@@ -17,4 +17,8 @@ The `.step` files can be opened in any CAD program (FreeCAD, Fusion 360, SolidWo
 
 [Specter Shield Metal Case - build & overview](https://www.youtube.com/watch?v=qKhnB6VP4jA)
 
+## EMC / CE
+
+See [CE_EMC_Compliance.md](./CE_EMC_Compliance.md) for the electromagnetic compatibility status of the assembled device.
+
 Design by @Schnuartz.
