@@ -1,4 +1,4 @@
-# Specter Shield Metal Case (M3Y)
+# Specter Shield Metal Case (orange pioneer)
 
 A CNC-machined metal alternative to the printed cases above, designed for the Specter Shield + F469-Discovery combination. Version 1.3.
 
