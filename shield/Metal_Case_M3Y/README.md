@@ -15,6 +15,11 @@ This case was originally professionally manufactured and is compatible with the 
 
 The `.step` files can be opened in any CAD program (FreeCAD, Fusion 360, SolidWorks, etc.) and sent to a CNC/machining service. The PDFs contain dimensioned drawings for the Pusher and Slider parts.
 
+## Scanner mounting screws
+
+- **M1 x 6mm** - needed to mount the M3Y scanner module, e.g. [available here](https://de.aliexpress.com/item/1005006676743568.html)
+- **1.4 x 4mm** - needed to mount the GM65 scanner module, e.g. [available here](https://de.aliexpress.com/item/1005006674812661.html)
+
 ## Assembly / build video
 
 [Specter Shield Metal Case - build & overview](https://www.youtube.com/watch?v=qKhnB6VP4jA)
