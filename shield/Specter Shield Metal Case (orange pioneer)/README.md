@@ -15,6 +15,8 @@ This case was originally professionally manufactured and is compatible with the 
 
 The `.step` files can be opened in any CAD program (FreeCAD, Fusion 360, SolidWorks, etc.) and sent to a CNC/machining service. The PDFs contain dimensioned drawings for the Pusher and Slider parts.
 
+![Specter Shield Metal Case, orange, assembled with smartcard setup menu shown](./specter-shield-metal-orange-angled-smartcard-setup-menu.jpg)
+
 ## Scanner mounting screws
 
 - **M1 x 6mm** - needed to mount the M3Y scanner module, e.g. [available here](https://de.aliexpress.com/item/1005006676743568.html)
@@ -22,6 +24,4 @@ The `.step` files can be opened in any CAD program (FreeCAD, Fusion 360, SolidWo
 
 ## Assembly / build video
 
-[Specter Shield Metal Case - build & overview](https://www.youtube.com/watch?v=qKhnB6VP4jA)
-
-Design by @Schnuartz.
+[![Specter Shield Metal Case - build & overview](https://img.youtube.com/vi/qKhnB6VP4jA/maxresdefault.jpg)](https://www.youtube.com/watch?v=qKhnB6VP4jA)
