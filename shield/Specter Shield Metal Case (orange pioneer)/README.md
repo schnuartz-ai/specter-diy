@@ -6,7 +6,7 @@ A CNC-machined metal alternative to the printed cases above, designed for the Sp
 
 Unlike the printed cases, all parts are milled from metal and held together with a slider/pusher locking mechanism instead of screws into printed bosses.
 
-This case was originally professionally manufactured and is compatible with the standard Specter Shield board. Version 1.3 in this folder was reworked by @Schnuartz to make it compatible with the M3Y QR scanner module.
+Originally designed by @geometrick-design and professionally manufactured, this case is compatible with the standard Specter Shield board. Version 1.3 in this folder was reworked by @Schnuartz to make it compatible with the M3Y QR scanner module.
 
 ## Files
 

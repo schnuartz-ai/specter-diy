@@ -19,4 +19,4 @@ Available in [our shop](https://specter.solutions/shop/specter-shield/). Assembl
 
 ## Metal case for Specter-DIY + Shield:
 
-- Design by @Schnuartz: CNC-machined metal housing, [files and build video](./Specter%20Shield%20Metal%20Case%20%28orange%20pioneer%29)
+- Design by @geometrick-design: CNC-machined metal housing, [files and build video](./Specter%20Shield%20Metal%20Case%20%28orange%20pioneer%29)
