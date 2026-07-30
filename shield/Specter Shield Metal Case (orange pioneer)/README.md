@@ -1,5 +1,7 @@
 # Specter Shield Metal Case (orange pioneer)
 
+![Specter Shield Metal Case, orange, assembled with smartcard setup menu shown](./specter-shield-metal-orange-angled-smartcard-setup-menu.jpg)
+
 A CNC-machined metal alternative to the printed cases above, designed for the Specter Shield + F469-Discovery combination. Version 1.3.
 
 Unlike the printed cases, all parts are milled from metal and held together with a slider/pusher locking mechanism instead of screws into printed bosses.
@@ -14,8 +16,6 @@ This case was originally professionally manufactured and is compatible with the 
 - `Slider.STEP` / `Slider.PDF` - slider part with manufacturing drawing
 
 The `.step` files can be opened in any CAD program (FreeCAD, Fusion 360, SolidWorks, etc.) and sent to a CNC/machining service. The PDFs contain dimensioned drawings for the Pusher and Slider parts.
-
-![Specter Shield Metal Case, orange, assembled with smartcard setup menu shown](./specter-shield-metal-orange-angled-smartcard-setup-menu.jpg)
 
 ## Scanner mounting screws
 
