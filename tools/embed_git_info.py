@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate git metadata for embedding into frozen MicroPython modules."""
+"""Generate deterministic source metadata for frozen MicroPython modules."""
 
 from __future__ import annotations
 
@@ -20,25 +20,22 @@ def _run_git(args: list[str]) -> Optional[str]:
 
 
 def discover_repository() -> str:
-    repo = _run_git(["config", "--get", "remote.origin.url"])
-    if repo:
-        return repo
-    path = _run_git(["rev-parse", "--show-toplevel"])
-    return path or UNKNOWN_VALUE
+    # A clone remote is build-environment metadata, not source identity. Using
+    # a canonical upstream URL would also misattribute fork-only commits to the
+    # upstream repository, so do not embed a repository URL at all.
+    return UNKNOWN_VALUE
 
 
 def discover_branch() -> str:
-    branch = _run_git(["rev-parse", "--abbrev-ref", "HEAD"])
-    if branch and branch != "HEAD":
-        return branch
-    describe = _run_git(["describe", "--all"])
-    if describe:
-        return describe
-    return "detached"
+    # Branch/tag refs can differ for the same commit (branch checkout, detached
+    # HEAD, shallow clone, etc.), so embedding them breaks reproducible builds.
+    return UNKNOWN_VALUE
 
 
 def discover_commit() -> str:
-    commit = _run_git(["rev-parse", "--short", "HEAD"])
+    # Use the full object id. Git's default abbreviated SHA length can vary with
+    # the objects present in a clone, so --short is not reproducible.
+    commit = _run_git(["rev-parse", "HEAD"])
     if commit:
         return commit
     return UNKNOWN_VALUE
