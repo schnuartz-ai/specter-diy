@@ -2,6 +2,10 @@
 
 With [docker](https://docs.docker.com/get-docker/) you can build the firmware yourself in the same environment as we do, and verify that binaries in github releases have the same hash. This way you can be sure that firmware upgrades signed by our public keys are actually built from the code in this repository, no backdoors included.
 
+The firmware embeds source provenance for the About screen. To keep builds reproducible, the embedded repository is canonicalized, local branch/tag refs are not embedded, and the full git commit SHA is used instead of an abbreviated SHA. This means that the clone URL (HTTPS, SSH, or a fork remote) and whether the commit is checked out on a branch or as detached HEAD do not affect the firmware binary.
+
+For byte-for-byte comparison with an official release, use a git checkout of the release tag. A source archive without `.git` metadata embeds the commit as `unknown`, so it is deterministic on its own but will not byte-match a release built from a git checkout.
+
 From the root of the repository:
 
 1. Set up bootloader to use production keys:
