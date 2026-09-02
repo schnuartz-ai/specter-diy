@@ -1,3 +1,4 @@
+import os
 import subprocess
 import sys
 import tempfile
@@ -12,6 +13,19 @@ def run_git(cwd: Path, *args: str) -> str:
     return subprocess.check_output(
         ["git", *args], cwd=cwd, text=True, stderr=subprocess.DEVNULL
     ).strip()
+
+
+def run_script(output: Path, cwd: Path, extra_env=None) -> str:
+    env = dict(os.environ)
+    for key in ("SPECTER_REPRODUCIBLE_BUILD", "SPECTER_GIT_REPOSITORY",
+                "SPECTER_GIT_BRANCH", "SPECTER_GIT_COMMIT"):
+        env.pop(key, None)
+    if extra_env:
+        env.update(extra_env)
+    subprocess.check_call(
+        [sys.executable, str(SCRIPT), str(output)], cwd=cwd, env=env
+    )
+    return output.read_text()
 
 
 class GitInfoReproducibilityTest(TestCase):
@@ -52,17 +66,8 @@ class GitInfoReproducibilityTest(TestCase):
                 "https://example.invalid/other/specter-diy.git",
             )
 
-            output_a = root / "git-info-a.py"
-            output_b = root / "git-info-b.py"
-            subprocess.check_call(
-                [sys.executable, str(SCRIPT), str(output_a)], cwd=clone_a
-            )
-            subprocess.check_call(
-                [sys.executable, str(SCRIPT), str(output_b)], cwd=clone_b
-            )
-
-            content_a = output_a.read_text()
-            content_b = output_b.read_text()
+            content_a = run_script(root / "git-info-a.py", clone_a)
+            content_b = run_script(root / "git-info-b.py", clone_b)
 
             self.assertEqual(content_a, content_b)
             # Checkout metadata is not source identity. Keeping it neutral also
@@ -79,11 +84,58 @@ class GitInfoReproducibilityTest(TestCase):
             root = Path(tmp)
             output = root / "git-info.py"
 
-            subprocess.check_call(
-                [sys.executable, str(SCRIPT), str(output)], cwd=root
-            )
-            content = output.read_text()
+            content = run_script(output, root)
 
             self.assertIn("REPOSITORY = 'unknown'", content)
             self.assertIn("BRANCH = 'unknown'", content)
             self.assertIn("COMMIT = 'unknown'", content)
+
+    def test_reproducible_build_output_is_source_acquisition_independent(self):
+        """Release builds (SPECTER_REPRODUCIBLE_BUILD=1) must produce identical
+        output from a git checkout and from a .git-less source archive."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            checkout = root / "checkout"
+            archive = root / "archive"
+            checkout.mkdir()
+
+            run_git(checkout, "init")
+            run_git(checkout, "config", "user.name", "Specter Test")
+            run_git(checkout, "config", "user.email", "specter@example.invalid")
+            (checkout / "payload.txt").write_text("same source\n")
+            run_git(checkout, "add", "payload.txt")
+            run_git(checkout, "commit", "-m", "fixture")
+            commit = run_git(checkout, "rev-parse", "HEAD")
+
+            # A source archive: same files, no .git metadata.
+            archive.mkdir()
+            (archive / "payload.txt").write_text("same source\n")
+
+            env = {"SPECTER_REPRODUCIBLE_BUILD": "1"}
+            from_checkout = run_script(root / "a.py", checkout, env)
+            from_archive = run_script(root / "b.py", archive, env)
+
+            self.assertEqual(from_checkout, from_archive)
+            self.assertIn("REPOSITORY = 'unknown'", from_checkout)
+            self.assertIn("BRANCH = 'unknown'", from_checkout)
+            self.assertIn("COMMIT = 'unknown'", from_checkout)
+            self.assertNotIn(commit, from_checkout)
+
+    def test_explicit_overrides_are_embedded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            content = run_script(
+                root / "git-info.py",
+                root,
+                {
+                    "SPECTER_GIT_REPOSITORY": "https://example.org/specter-diy",
+                    "SPECTER_GIT_BRANCH": "v9.9.9",
+                    "SPECTER_GIT_COMMIT": "0" * 40,
+                },
+            )
+
+            self.assertIn(
+                "REPOSITORY = 'https://example.org/specter-diy'", content
+            )
+            self.assertIn("BRANCH = 'v9.9.9'", content)
+            self.assertIn("COMMIT = '%s'" % ("0" * 40), content)
