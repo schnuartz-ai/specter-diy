@@ -67,6 +67,8 @@ class WalletManager(BaseApp):
     # supported networks
     Networks = NETWORKS
     DEFAULT_SIGHASH = SIGHASH.ALL
+    # Fixed threshold matching BitBox; deliberately not a user setting.
+    HIGH_FEE_PERCENT = 10
 
     def __init__(self, path):
         self.root_path = path
@@ -356,10 +358,27 @@ class WalletManager(BaseApp):
         if not await self.confirm_wallets(wallets, show_screen):
             return
 
+        # An unusually high or otherwise unassessable fee must be
+        # acknowledged explicitly so it cannot be scrolled past.
+        if not await self.confirm_fee_warning(meta, show_screen):
+            return
+
         if not await self.confirm_transaction_final(wallets, meta, show_screen):
             return
 
         return dict(sighash=sighash)
+
+    async def confirm_fee_warning(self, meta, show_screen):
+        warning = meta.get("fee_warning")
+        if not warning:
+            return True
+        scr = Prompt(
+            "Warning!",
+            "\n" + warning + "\n\n\n"
+            "Double-check the transaction fee before continuing.\n\n\n"
+            "Proceed anyway?",
+        )
+        return bool(await show_screen(scr))
 
     async def confirm_transaction_final(self, wallets, meta, show_screen):
         # build title for the tx screen
@@ -436,20 +455,32 @@ class WalletManager(BaseApp):
             spending_wallets = [w for w in wallets if w is not None]
             if len(spending_wallets) == 1:
                 candidate = spending_wallets[0]
-                branch1_claims = [
-                    claim for claim in self.get_wallet_derivation_claims(candidate, out)
-                    if claim[1] == 1
-                ]
-                for idx, branch_idx in branch1_claims:
-                    try:
-                        desc, _ = candidate.get_descriptor(idx, branch_idx)
-                    except Exception:
-                        continue
-                    if out.script_pubkey is not None and desc.script_pubkey() == out.script_pubkey:
-                        break
-                else:
-                    if branch1_claims:
+                # Position 1 only has receive/change semantics for the
+                # canonical two-branch descriptor shape. Other descriptors
+                # must not produce a warning that claims the host forged
+                # change metadata.
+                if candidate.descriptor.num_branches == 2:
+                    branch1_claims = [
+                        claim for claim in self.get_wallet_derivation_claims(candidate, out)
+                        if claim[1] == 1
+                    ]
+                    if len(branch1_claims) > 1:
+                        # Distinct branch-1 claims are contradictory. They
+                        # can never justify hiding an output, so avoid doing
+                        # an expensive descriptor re-derivation for each one.
                         warning = INVALID_CHANGE_METADATA_WARNING
+                    elif branch1_claims:
+                        idx, branch_idx = branch1_claims[0]
+                        try:
+                            desc, _ = candidate.get_descriptor(idx, branch_idx)
+                        except Exception:
+                            desc = None
+                        if (
+                            desc is None
+                            or out.script_pubkey is None
+                            or desc.script_pubkey() != out.script_pubkey
+                        ):
+                            warning = INVALID_CHANGE_METADATA_WARNING
 
         is_change = False
         if wallet is not None and derivation is not None:
@@ -833,6 +864,9 @@ class WalletManager(BaseApp):
             derivation, is_change, warning = self.get_output_status(wallet, wallets, out)
             metaout.update({
                 "change": is_change,
+                # Ownership is separate from the UI change classification.
+                # Wallet-owned outputs must not inflate the send amount.
+                "owned": wallet is not None and wallet in wallets,
                 "value": value,
                 "address": self.get_address(out),
             })
@@ -863,16 +897,73 @@ class WalletManager(BaseApp):
 
             out.write_to(fout, version=psbtv.version)
         meta["fee"] = fee
-        self.add_warnings(wallets, meta)
+        self.add_warnings(meta, wallets)
         return wallets, meta
 
-    def add_warnings(self, wallets, meta):
+    def _fee_basis_for_asset(self, meta, fee_asset=None):
+        """Return (basis, is_send_amount) using verified transaction values."""
+        send_amount = sum(
+            out["value"]
+            for out in meta.get("outputs", [])
+            if out.get("value", 0) > 0
+            and not out.get("fee_output", False)
+            and not out.get("owned", out.get("change", False))
+            and (fee_asset is None or out.get("asset_id") == fee_asset)
+        )
+        if send_amount > 0:
+            return send_amount, True
+
+        verified_input_total = sum(
+            inp["value"]
+            for inp in meta.get("inputs", [])
+            if inp.get("value", 0) > 0
+            and (fee_asset is None or inp.get("asset_id") == fee_asset)
+        )
+        return verified_input_total, False
+
+    def fee_assessment(self, meta):
+        """Return fee assessment data for this transaction backend."""
+        fee_basis, is_send_amount = self._fee_basis_for_asset(meta)
+        return {
+            "fee_basis": fee_basis,
+            "fee_basis_is_send_amount": is_send_amount,
+        }
+
+    def add_warnings(self, meta, wallets=None):
         """Add transaction-level warnings without replacing existing ones."""
-        if len(wallets) > 1:
-            warning = "Mixed inputs from different wallets!"
+        def add_warning(warning):
             warnings = meta.setdefault("warnings", [])
             if warning not in warnings:
                 warnings.append(warning)
+
+        if wallets is not None and len(wallets) > 1:
+            add_warning("Mixed inputs from different wallets!")
+
+        fee = meta.get("fee")
+        assessment = self.fee_assessment(meta)
+        meta.pop("fee_warning", None)
+        meta["fee_basis"] = assessment.get("fee_basis")
+        meta["fee_basis_is_send_amount"] = assessment.get(
+            "fee_basis_is_send_amount", True
+        )
+        meta["fee_percent"] = None
+
+        if assessment.get("warning"):
+            meta["fee_warning"] = assessment["warning"]
+            add_warning(assessment["warning"])
+            return
+
+        fee_basis = assessment.get("fee_basis", 0)
+        if fee is not None and fee > 0 and fee_basis > 0:
+            fee_percent = fee * 100 / fee_basis
+            meta["fee_percent"] = fee_percent
+            if fee * 100 >= fee_basis * self.HIGH_FEE_PERCENT:
+                if meta["fee_basis_is_send_amount"]:
+                    warning = "Fee is %.2f%% of the send amount - unusually high!" % fee_percent
+                else:
+                    warning = "Fee is %.2f%% of total inputs (self-transfer) - unusually high!" % fee_percent
+                meta["fee_warning"] = warning
+                add_warning(warning)
 
     def sign_psbtview(self, psbtv, out_stream, wallets, sighash):
         for w in wallets:
