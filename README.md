@@ -39,6 +39,7 @@ All the docs are stored in the [`docs/`](./docs) folder:
 - [`security.md`](./docs/security.md) explains possible attack vectors and security model of the project
 - [`development.md`](./docs/development.md) explains how to start developing on Specter
 - [`simulator.md`](./docs/simulator.md) shows how to run a simulator on unix/macOS
+- [`browser-simulator.md`](./docs/browser-simulator.md) explains the browser simulator, local build, and PR previews
 - [`communication.md`](./docs/communication.md) defines communication protocol with the host over QR codes and USB
 - [`roadmap.md`](./docs/roadmap.md) explains what we need to implement before we can consider the wallet be ready to use with real funds.
 
