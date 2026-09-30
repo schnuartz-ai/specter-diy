@@ -14,8 +14,9 @@
  *   - O sensor e sondado por endereco em vez de assumido: a Waveshare 4.3
  *     costuma vir com OV5647, mas placas irmas trazem SC2336.
  *
- * Formato: V4L2_PIX_FMT_GREY. O quirc trabalha em tons de cinza, entao pedir
- * GREY ao sensor evita converter a cada quadro.
+ * O QR decoder prefere GREY, mas aceita RGB565 e SBGGR8 como fallbacks. O
+ * formato efetivamente negociado com V4L2 e sempre registrado e usado na
+ * conversao, em vez de assumir que S_FMT aceitou exatamente o pedido.
  */
 
 #include "p4camera.h"
@@ -45,6 +46,7 @@ static int video_fd = -1;
 static p4camera_sensor_t sensor = P4CAM_SENSOR_NONE;
 static uint16_t frame_width;
 static uint16_t frame_height;
+static size_t frame_stride;
 static uint8_t *buffers[BUFFER_COUNT];
 static size_t buffer_lengths[BUFFER_COUNT];
 static struct v4l2_buffer current;
@@ -184,7 +186,7 @@ esp_err_t p4camera_init(void) {
     static const uint32_t preferred[] = {
         V4L2_PIX_FMT_GREY,     /* melhor: ja e luminancia */
         V4L2_PIX_FMT_RGB565,   /* aceitavel: converter por quadro */
-        V4L2_PIX_FMT_SBGGR8,   /* Bayer cru: o canal verde serve de aproximacao */
+        V4L2_PIX_FMT_SBGGR8,   /* Bayer 8-bit: suficiente para QR acromatico */
     };
     uint32_t chosen = format.fmt.pix.pixelformat;
     bool picked = false;
@@ -214,17 +216,33 @@ esp_err_t p4camera_init(void) {
             init_stage = "S_FMT";
             goto fail;
         }
+        /* V4L2 may adjust width, height, stride or even the pixel format.
+         * The structure returned by S_FMT describes what will actually arrive. */
+        format = want;
     }
-    pixel_format = chosen;
+
+    frame_width = format.fmt.pix.width;
+    frame_height = format.fmt.pix.height;
+    pixel_format = format.fmt.pix.pixelformat;
+    frame_stride = format.fmt.pix.bytesperline;
+    if (frame_stride == 0) {
+        if (pixel_format == V4L2_PIX_FMT_RGB565) {
+            frame_stride = (size_t)frame_width * 2;
+        } else if (pixel_format == V4L2_PIX_FMT_GREY ||
+                   pixel_format == V4L2_PIX_FMT_SBGGR8) {
+            frame_stride = frame_width;
+        }
+    }
 
     if (start_streaming() != ESP_OK) {
         init_stage = "streaming";
         goto fail;
     }
     init_stage = "ok";
-    ESP_LOGI(TAG, "streaming %ux%u fmt=%c%c%c%c", frame_width, frame_height,
-        (char)(pixel_format), (char)(pixel_format >> 8),
-        (char)(pixel_format >> 16), (char)(pixel_format >> 24));
+    ESP_LOGI(TAG, "streaming %ux%u stride=%u fmt=%c%c%c%c", frame_width,
+        frame_height, (unsigned)frame_stride, (char)(pixel_format),
+        (char)(pixel_format >> 8), (char)(pixel_format >> 16),
+        (char)(pixel_format >> 24));
     return ESP_OK;
 
 fail:
@@ -251,6 +269,8 @@ void p4camera_deinit(void) {
     }
     holding_frame = false;
     frame_width = frame_height = 0;
+    frame_stride = 0;
+    pixel_format = 0;
     sensor = P4CAM_SENSOR_NONE;
     free(gray_buffer);
     gray_buffer = NULL;
@@ -338,9 +358,9 @@ static esp_err_t ensure_gray_buffer(void) {
  * exatos: e uma soma e um shift por pixel, e o quirc so precisa de contraste
  * entre modulo claro e escuro, nao de fidelidade colorimetrica. */
 static void rgb565_to_gray(const uint8_t *src) {
-    const uint16_t *pixels = (const uint16_t *)src;
     for (uint16_t y = 0; y < gray_height; ++y) {
-        const uint16_t *row = pixels + (size_t)(y * GRAY_DOWNSCALE) * frame_width;
+        const uint16_t *row = (const uint16_t *)(src +
+            (size_t)(y * GRAY_DOWNSCALE) * frame_stride);
         uint8_t *out = gray_buffer + (size_t)y * gray_width;
         for (uint16_t x = 0; x < gray_width; ++x) {
             uint16_t pixel = row[x * GRAY_DOWNSCALE];
@@ -353,14 +373,28 @@ static void rgb565_to_gray(const uint8_t *src) {
     }
 }
 
+/* GREY e SBGGR8 sao ambos um byte por pixel. Para um QR preto/branco nao ha
+ * necessidade de demosaico do Bayer: o contraste entre modulos continua
+ * presente. O downscale tambem reduz o ruido de alta frequencia do mosaico. */
+static void gray8_to_gray(const uint8_t *src) {
+    for (uint16_t y = 0; y < gray_height; ++y) {
+        const uint8_t *row = src +
+            (size_t)(y * GRAY_DOWNSCALE) * frame_stride;
+        uint8_t *out = gray_buffer + (size_t)y * gray_width;
+        for (uint16_t x = 0; x < gray_width; ++x) {
+            out[x] = row[x * GRAY_DOWNSCALE];
+        }
+    }
+}
+
 esp_err_t p4camera_scan(uint8_t *payload, size_t capacity, size_t *length) {
     if (length) *length = 0;
     if (video_fd < 0 || !streaming) {
         return ESP_ERR_INVALID_STATE;
     }
-    if (pixel_format != V4L2_PIX_FMT_RGB565) {
-        /* Formatos crus de Bayer precisariam de demosaico antes; o codigo
-         * cobre so o caso que este sensor entrega de fato. */
+    if (pixel_format != V4L2_PIX_FMT_RGB565 &&
+        pixel_format != V4L2_PIX_FMT_GREY &&
+        pixel_format != V4L2_PIX_FMT_SBGGR8) {
         return ESP_ERR_NOT_SUPPORTED;
     }
     esp_err_t err = ensure_gray_buffer();
@@ -374,8 +408,25 @@ esp_err_t p4camera_scan(uint8_t *payload, size_t capacity, size_t *length) {
     if (err != ESP_OK) {
         return err;
     }
-    rgb565_to_gray(frame);
-    p4camera_release();
+
+    size_t required = frame_stride * (size_t)frame_height;
+    if (frame_stride == 0 || frame_length < required) {
+        p4camera_release();
+        ESP_LOGE(TAG, "short camera frame: %u bytes, need %u",
+            (unsigned)frame_length, (unsigned)required);
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    if (pixel_format == V4L2_PIX_FMT_RGB565) {
+        rgb565_to_gray(frame);
+    } else {
+        gray8_to_gray(frame);
+    }
+
+    err = p4camera_release();
+    if (err != ESP_OK) {
+        return err;
+    }
 
     k_quirc_result_t result;
     int found = k_quirc_decode_grayscale(gray_buffer, gray_width, gray_height,
