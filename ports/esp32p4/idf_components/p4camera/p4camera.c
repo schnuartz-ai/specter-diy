@@ -373,16 +373,16 @@ static void rgb565_to_gray(const uint8_t *src) {
     }
 }
 
-/* GREY e SBGGR8 sao ambos um byte por pixel. Para um QR preto/branco nao ha
- * necessidade de demosaico do Bayer: o contraste entre modulos continua
- * presente. O downscale tambem reduz o ruido de alta frequencia do mosaico. */
-static void gray8_to_gray(const uint8_t *src) {
+/* GREY e SBGGR8 sao ambos um byte por pixel. Para Bayer usamos o pixel verde
+ * de cada bloco 2x2 (linha par, coluna impar); para GREY usamos o primeiro.
+ * Assim nao precisamos de demosaico para um QR preto/branco. */
+static void gray8_to_gray(const uint8_t *src, uint16_t x_offset) {
     for (uint16_t y = 0; y < gray_height; ++y) {
         const uint8_t *row = src +
             (size_t)(y * GRAY_DOWNSCALE) * frame_stride;
         uint8_t *out = gray_buffer + (size_t)y * gray_width;
         for (uint16_t x = 0; x < gray_width; ++x) {
-            out[x] = row[x * GRAY_DOWNSCALE];
+            out[x] = row[x * GRAY_DOWNSCALE + x_offset];
         }
     }
 }
@@ -419,8 +419,11 @@ esp_err_t p4camera_scan(uint8_t *payload, size_t capacity, size_t *length) {
 
     if (pixel_format == V4L2_PIX_FMT_RGB565) {
         rgb565_to_gray(frame);
+    } else if (pixel_format == V4L2_PIX_FMT_GREY) {
+        gray8_to_gray(frame, 0);
     } else {
-        gray8_to_gray(frame);
+        /* SBGGR8: pixel (0,1) de cada bloco 2x2 e verde. */
+        gray8_to_gray(frame, 1);
     }
 
     err = p4camera_release();
