@@ -12,6 +12,15 @@ import sys
 API = "https://api.github.com"
 MARKER = "<!-- specter-web-simulator-preview -->"
 
+# Keep these values in sync with the paired Web Simulator workflow. The
+# dispatch caller allows the 5m validate + 180m build + 10m finalize chain,
+# along with a small scheduling and polling buffer.
+REMOTE_VALIDATE_TIMEOUT_MINUTES = 5
+REMOTE_BUILD_TIMEOUT_MINUTES = 180
+REMOTE_FINALIZE_TIMEOUT_MINUTES = 10
+POLL_TIMEOUT_MINUTES = 210
+CALLER_WORKFLOW_TIMEOUT_MINUTES = 240
+
 
 def gh(method, path, token="", data=None):
     headers = {"Accept": "application/vnd.github+json", "User-Agent": "specter-preview"}
@@ -28,9 +37,24 @@ def gh(method, path, token="", data=None):
         raise RuntimeError("GitHub API request failed")
 
 
+def list_comments(repo, number, token):
+    """Fetch every issue-comment page so the bot comment stays unique."""
+    path = f"/repos/{repo}/issues/{number}/comments"
+    comments = []
+    page = 1
+    while True:
+        batch = gh("GET", path + "?" + urlencode({"per_page": 100, "page": page}), token)
+        if not isinstance(batch, list):
+            raise RuntimeError("GitHub returned an invalid issue-comment page")
+        comments.extend(batch)
+        if len(batch) < 100:
+            return comments
+        page += 1
+
+
 def comment(repo, number, token, text):
     path = f"/repos/{repo}/issues/{number}/comments"
-    comments = gh("GET", path + "?per_page=100", token)
+    comments = list_comments(repo, number, token)
     found = [c for c in comments if MARKER in c.get("body", "") and
              c.get("user", {}).get("login") == "github-actions[bot]"]
     body = {"body": f"{text}\n\n{MARKER}"}
@@ -57,6 +81,17 @@ def current(repo, number, action, sha, token):
         pr.get("head", {}).get("sha") == sha
 
 
+def preview_authorized(base_repository, head_repository, labels):
+    """Same-repository PRs pass automatically; fork PRs need an approval label."""
+    if (isinstance(base_repository, str) and isinstance(head_repository, str) and
+            head_repository and base_repository.lower() == head_repository.lower()):
+        return True
+    return isinstance(labels, list) and any(
+        isinstance(label, dict) and label.get("name") == "preview-approved"
+        for label in labels
+    )
+
+
 def result_text(status, short_sha, preview, simulator):
     repo = re.escape(simulator)
     run = status.get("run_url", "")
@@ -78,6 +113,25 @@ def result_text(status, short_sha, preview, simulator):
     raise ValueError("unsupported status")
 
 
+def _labels_from_environment():
+    try:
+        labels = json.loads(os.environ.get("PR_LABELS_JSON", "[]"))
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(labels, list) or any(
+            not isinstance(label, dict) or not isinstance(label.get("name"), str)
+            for label in labels):
+        return None
+    return labels
+
+
+def _comment_if_current(repo, number, action, sha, token, text):
+    if current(repo, number, action, sha, token) is True:
+        comment(repo, number, token, text)
+        return True
+    return False
+
+
 def main():
     base = os.environ["BASE_REPOSITORY"]
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", base):
@@ -94,8 +148,23 @@ def main():
     request_id = f"specter-pr-{number}-{sha}-{os.environ['GITHUB_RUN_ID']}-{os.environ['GITHUB_RUN_ATTEMPT']}"
     root = pages_root(simulator)
     preview, status_url = root + f"pr/{number}/", root + f"status/pr/{number}.json"
+
+    # A failed metadata lookup (None) must never authorize a status comment or
+    # a privileged remote dispatch. Close requests are verified against the
+    # live closed PR state but intentionally skip the approval-label gate.
+    if current(base, number, action, sha, token) is not True:
+        return
+
+    if action == "build" and not preview_authorized(
+            base, os.environ.get("HEAD_REPOSITORY", ""), _labels_from_environment()):
+        comment(base, number, token,
+                f"🧪 Specter PR Build · {short} ⏸️\n\nA maintainer must add the `preview-approved` label before a fork PR preview can run.")
+        return
+
     if not os.environ.get("WEB_SIMULATOR_DISPATCH_TOKEN"):
-        comment(base, number, token, f"🧪 Specter PR Build · {short} ⚠️\n\nConfigure the paired Web Simulator and `WEB_SIMULATOR_DISPATCH_TOKEN` secret.")
+        _comment_if_current(
+            base, number, action, sha, token,
+            f"🧪 Specter PR Build · {short} ⚠️\n\nConfigure the paired Web Simulator and `WEB_SIMULATOR_DISPATCH_TOKEN` secret.")
         return
     try:
         service = gh("GET", f"/repos/{simulator}")
@@ -106,14 +175,18 @@ def main():
         gh("POST", f"/repos/{simulator}/actions/workflows/preview.yml/dispatches",
            os.environ["WEB_SIMULATOR_DISPATCH_TOKEN"], {"ref": service["default_branch"], "inputs": inputs})
     except (RuntimeError, KeyError) as exc:
-        comment(base, number, token, f"🧪 Specter PR Build · {short} ⚠️\n\nThe paired Web Simulator could not start ({type(exc).__name__}). Check Actions settings and the secret's Actions: write permission.")
+        _comment_if_current(
+            base, number, action, sha, token,
+            f"🧪 Specter PR Build · {short} ⚠️\n\nThe paired Web Simulator could not start ({type(exc).__name__}). Check Actions settings and the secret's Actions: write permission.")
         return
 
     note = "Removing the preview for this closed PR." if action == "delete" else "Browser simulator and firmware are being built."
-    comment(base, number, token, f"🧪 Specter PR Build · {short} ⏳\n\n{note}\n\nSource commit: `{short}`")
-    deadline, delay = monotonic() + 55 * 60, 10
+    _comment_if_current(base, number, action, sha, token,
+                        f"🧪 Specter PR Build · {short} ⏳\n\n{note}\n\nSource commit: `{short}`")
+    deadline, delay = monotonic() + POLL_TIMEOUT_MINUTES * 60, 10
     while monotonic() < deadline:
-        if current(base, number, action, sha, token) is False:
+        state = current(base, number, action, sha, token)
+        if state is False:
             return
         url = status_url + "?" + urlencode({"request_id": request_id, "poll": int(time())})
         try:
@@ -127,13 +200,19 @@ def main():
                 text = result_text(result, short, preview, simulator)
             except (ValueError, KeyError):
                 text = f"🧪 Specter PR Build · {short} ⚠️\n\nThe Web Simulator returned an invalid result link."
-            if current(base, number, action, sha, token) is not False:
+            state = current(base, number, action, sha, token)
+            if state is False:
+                return
+            if state is True:
                 comment(base, number, token, text)
-            return
+                return
+            # An API error is unknown, not proof that this result is current.
+            # Keep polling and retry verification instead of writing a comment.
         sleep(min(delay, max(0, deadline - monotonic())))
         delay = min(60, int(delay * 1.5))
-    if current(base, number, action, sha, token) is not False:
-        comment(base, number, token, f"🧪 Specter PR Build · {short} ⚠️\n\nThe remote Web Simulator did not return a matching result in time. Check its Actions page or rerun the preview.")
+    _comment_if_current(
+        base, number, action, sha, token,
+        f"🧪 Specter PR Build · {short} ⚠️\n\nThe remote Web Simulator did not return a matching result in time. Check its Actions page or rerun the preview.")
 
 
 if __name__ == "__main__":
