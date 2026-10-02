@@ -72,13 +72,15 @@ def pages_root(repo):
     return f"https://{host}/" + ("" if name.lower() == host else f"{name}/")
 
 
-def current(repo, number, action, sha, token):
+def current(repo, number, action, sha, token, base_sha=None, base_ref=None):
     try:
         pr = gh("GET", f"/repos/{repo}/pulls/{number}", token)
     except RuntimeError:
         return None
-    return (pr.get("state") == "closed" if action == "delete" else pr.get("state") == "open") and \
-        pr.get("head", {}).get("sha") == sha
+    return ((pr.get("state") == "closed" if action == "delete" else pr.get("state") == "open") and
+            pr.get("head", {}).get("sha") == sha and
+            (action == "delete" or base_sha is None or pr.get("base", {}).get("sha") == base_sha) and
+            (action == "delete" or base_ref is None or pr.get("base", {}).get("ref") == base_ref))
 
 
 def result_text(status, short_sha, preview, simulator):
@@ -102,8 +104,8 @@ def result_text(status, short_sha, preview, simulator):
     raise ValueError("unsupported status")
 
 
-def _comment_if_current(repo, number, action, sha, token, text):
-    if current(repo, number, action, sha, token) is True:
+def _comment_if_current(repo, number, action, sha, token, text, base_sha=None, base_ref=None):
+    if current(repo, number, action, sha, token, base_sha, base_ref) is True:
         comment(repo, number, token, text)
         return True
     return False
@@ -114,7 +116,11 @@ def main():
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", base):
         raise ValueError("invalid base repository")
     number, sha, action = int(os.environ["PR_NUMBER"]), os.environ["HEAD_SHA"], os.environ["ACTION"]
-    if not re.fullmatch(r"[a-f0-9]{40}", sha) or action not in ("build", "delete"):
+    base_sha, base_ref = os.environ["BASE_SHA"], os.environ["BASE_REF"]
+    if (not re.fullmatch(r"[a-f0-9]{40}", sha) or
+            not re.fullmatch(r"[a-f0-9]{40}", base_sha) or
+            not base_ref or len(base_ref) > 255 or
+            action not in ("build", "delete")):
         raise ValueError("invalid PR metadata")
     owner = base.split("/", 1)[0]
     simulator = os.environ.get("WEB_SIMULATOR_REPOSITORY", "").strip() or f"{owner}/specter-diy-web-simulator"
@@ -129,17 +135,19 @@ def main():
     # A failed metadata lookup (None) must never authorize a status comment or
     # a privileged remote dispatch. Fork and same-repository PRs follow the
     # same verified path; the build job remains isolated from repository writes.
-    if current(base, number, action, sha, token) is not True:
+    if current(base, number, action, sha, token, base_sha, base_ref) is not True:
         return
 
     if not os.environ.get("WEB_SIMULATOR_DISPATCH_TOKEN"):
         _comment_if_current(
             base, number, action, sha, token,
-            f"🧪 Specter PR Build · {short} ⚠️\n\nConfigure the paired Web Simulator and `WEB_SIMULATOR_DISPATCH_TOKEN` secret.")
+            f"🧪 Specter PR Build · {short} ⚠️\n\nConfigure the paired Web Simulator and `WEB_SIMULATOR_DISPATCH_TOKEN` secret.",
+            base_sha, base_ref)
         return
     try:
         service = gh("GET", f"/repos/{simulator}")
         inputs = {"request_id": request_id, "action": action, "base_repository": base,
+                  "base_sha": base_sha, "base_ref": base_ref,
                   "pr_number": str(number), "head_repository": os.environ.get("HEAD_REPOSITORY", ""),
                   "head_sha": sha, "head_ref": os.environ.get("HEAD_REF", ""),
                   "source_updated_at": os.environ["SOURCE_UPDATED_AT"]}
@@ -148,15 +156,17 @@ def main():
     except (RuntimeError, KeyError) as exc:
         _comment_if_current(
             base, number, action, sha, token,
-            f"🧪 Specter PR Build · {short} ⚠️\n\nThe paired Web Simulator could not start ({type(exc).__name__}). Check Actions settings and the secret's Actions: write permission.")
+            f"🧪 Specter PR Build · {short} ⚠️\n\nThe paired Web Simulator could not start ({type(exc).__name__}). Check Actions settings and the secret's Actions: write permission.",
+            base_sha, base_ref)
         return
 
     note = "Removing the preview for this closed PR." if action == "delete" else "Browser simulator and firmware are being built."
     _comment_if_current(base, number, action, sha, token,
-                        f"🧪 Specter PR Build · {short} ⏳\n\n{note}\n\nSource commit: `{short}`")
+                        f"🧪 Specter PR Build · {short} ⏳\n\n{note}\n\nSource commit: `{short}`",
+                        base_sha, base_ref)
     deadline, delay = monotonic() + POLL_TIMEOUT_MINUTES * 60, 10
     while monotonic() < deadline:
-        state = current(base, number, action, sha, token)
+        state = current(base, number, action, sha, token, base_sha, base_ref)
         if state is False:
             return
         url = status_url + "?" + urlencode({"request_id": request_id, "poll": int(time())})
@@ -171,7 +181,7 @@ def main():
                 text = result_text(result, short, preview, simulator)
             except (ValueError, KeyError):
                 text = f"🧪 Specter PR Build · {short} ⚠️\n\nThe Web Simulator returned an invalid result link."
-            state = current(base, number, action, sha, token)
+            state = current(base, number, action, sha, token, base_sha, base_ref)
             if state is False:
                 return
             if state is True:
@@ -183,7 +193,8 @@ def main():
         delay = min(60, int(delay * 1.5))
     _comment_if_current(
         base, number, action, sha, token,
-        f"🧪 Specter PR Build · {short} ⚠️\n\nThe remote Web Simulator did not return a matching result in time. Check its Actions page or rerun the preview.")
+        f"🧪 Specter PR Build · {short} ⚠️\n\nThe remote Web Simulator did not return a matching result in time. Check its Actions page or rerun the preview.",
+        base_sha, base_ref)
 
 
 if __name__ == "__main__":

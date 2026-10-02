@@ -54,6 +54,8 @@ class BrowserPreviewDispatcherTests(unittest.TestCase):
         environment = {
             "BASE_REPOSITORY": "cryptoadvance/specter-diy",
             "PR_NUMBER": "12",
+            "BASE_SHA": "b" * 40,
+            "BASE_REF": "master",
             "HEAD_REPOSITORY": "contributor/specter-diy",
             "HEAD_SHA": sha,
             "HEAD_REF": "feature",
@@ -76,6 +78,8 @@ class BrowserPreviewDispatcherTests(unittest.TestCase):
         self.assertEqual(len(dispatches), 1)
         self.assertEqual(dispatches[0][2], "dispatch-token")
         self.assertEqual(dispatches[0][3]["inputs"]["head_repository"], "contributor/specter-diy")
+        self.assertEqual(dispatches[0][3]["inputs"]["base_sha"], "b" * 40)
+        self.assertEqual(dispatches[0][3]["inputs"]["base_ref"], "master")
 
     def test_unknown_or_stale_pr_state_never_authorizes_a_comment(self):
         with patch.object(dispatcher, "current", return_value=None), \
