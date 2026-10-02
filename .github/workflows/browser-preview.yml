@@ -2,7 +2,7 @@ name: Browser simulator preview
 
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review, labeled, closed]
+    types: [opened, synchronize, reopened, ready_for_review, closed]
 
 permissions:
   contents: read
@@ -16,9 +16,7 @@ concurrency:
 jobs:
   preview:
     name: Dispatch and report browser preview
-    if: >-
-      github.event.pull_request.base.repo.full_name == github.repository &&
-      (github.event.action != 'labeled' || github.event.label.name == 'preview-approved')
+    if: github.event.pull_request.base.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 240
     steps:
@@ -35,7 +33,6 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           HEAD_REF: ${{ github.event.pull_request.head.ref || '' }}
           SOURCE_UPDATED_AT: ${{ github.event.pull_request.updated_at }}
-          PR_LABELS_JSON: ${{ toJSON(github.event.pull_request.labels) }}
           ACTION: ${{ github.event.action == 'closed' && 'delete' || 'build' }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}

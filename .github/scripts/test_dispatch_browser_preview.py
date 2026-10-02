@@ -2,6 +2,8 @@
 """Unit tests for preview dispatch authorization, comments, and timeout contracts."""
 from pathlib import Path
 from unittest.mock import patch
+import json
+import os
 import sys
 import unittest
 
@@ -13,17 +15,67 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class BrowserPreviewDispatcherTests(unittest.TestCase):
-    def test_fork_build_requires_exact_approval_label_but_same_repo_is_automatic(self):
-        self.assertTrue(dispatcher.preview_authorized(
-            "cryptoadvance/specter-diy", "cryptoadvance/specter-diy", []))
-        self.assertFalse(dispatcher.preview_authorized(
-            "cryptoadvance/specter-diy", "contributor/specter-diy", []))
-        self.assertFalse(dispatcher.preview_authorized(
-            "cryptoadvance/specter-diy", "contributor/specter-diy",
-            [{"name": "ready-for-review"}]))
-        self.assertTrue(dispatcher.preview_authorized(
-            "cryptoadvance/specter-diy", "contributor/specter-diy",
-            [{"name": "preview-approved"}]))
+    def test_fork_pr_dispatches_without_approval_label(self):
+        workflow = (ROOT / ".github/workflows/browser-preview.yml").read_text()
+        source = (ROOT / ".github/scripts/dispatch_browser_preview.py").read_text()
+        self.assertIn("closed", workflow)
+        self.assertIn("github.event.action == 'closed' && 'delete'", workflow)
+        self.assertNotIn("preview-approved", workflow + source)
+        self.assertNotIn("PR_LABELS_JSON", workflow + source)
+
+        sha = "a" * 40
+        request_id = f"specter-pr-12-{sha}-123-1"
+        status = {
+            "request_id": request_id,
+            "source_sha": sha,
+            "pr_number": 12,
+            "status": "cancelled",
+            "run_url": "https://github.com/cryptoadvance/specter-diy-web-simulator/actions/runs/456",
+        }
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return json.dumps(status).encode()
+
+        calls = []
+
+        def fake_gh(method, path, token="", data=None):
+            calls.append((method, path, token, data))
+            if method == "GET" and path == "/repos/cryptoadvance/specter-diy-web-simulator":
+                return {"default_branch": "main"}
+            return None
+
+        environment = {
+            "BASE_REPOSITORY": "cryptoadvance/specter-diy",
+            "PR_NUMBER": "12",
+            "HEAD_REPOSITORY": "contributor/specter-diy",
+            "HEAD_SHA": sha,
+            "HEAD_REF": "feature",
+            "SOURCE_UPDATED_AT": "2026-10-02T12:00:00Z",
+            "ACTION": "build",
+            "GITHUB_RUN_ID": "123",
+            "GITHUB_RUN_ATTEMPT": "1",
+            "GITHUB_TOKEN": "workflow-token",
+            "WEB_SIMULATOR_DISPATCH_TOKEN": "dispatch-token",
+            "WEB_SIMULATOR_REPOSITORY": "cryptoadvance/specter-diy-web-simulator",
+        }
+        with patch.dict(os.environ, environment), \
+                patch.object(dispatcher, "current", return_value=True), \
+                patch.object(dispatcher, "gh", side_effect=fake_gh), \
+                patch.object(dispatcher, "comment"), \
+                patch.object(dispatcher, "urlopen", return_value=Response()):
+            dispatcher.main()
+
+        dispatches = [call for call in calls if call[0] == "POST"]
+        self.assertEqual(len(dispatches), 1)
+        self.assertEqual(dispatches[0][2], "dispatch-token")
+        self.assertEqual(dispatches[0][3]["inputs"]["head_repository"], "contributor/specter-diy")
 
     def test_unknown_or_stale_pr_state_never_authorizes_a_comment(self):
         with patch.object(dispatcher, "current", return_value=None), \
@@ -78,14 +130,12 @@ class BrowserPreviewDispatcherTests(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/browser-preview.yml").read_text()
         self.assertIn(f"timeout-minutes: {dispatcher.CALLER_WORKFLOW_TIMEOUT_MINUTES}", workflow)
 
-    def test_approval_label_event_and_close_cleanup_bypass_are_wired(self):
+    def test_close_cleanup_remains_wired_without_label_trigger(self):
         workflow = (ROOT / ".github/workflows/browser-preview.yml").read_text()
-        source = (ROOT / ".github/scripts/dispatch_browser_preview.py").read_text()
-        self.assertIn("labeled", workflow)
         self.assertIn("closed", workflow)
-        self.assertIn("PR_LABELS_JSON:", workflow)
+        self.assertNotIn("labeled", workflow)
+        self.assertNotIn("PR_LABELS_JSON", workflow)
         self.assertIn("github.event.action == 'closed' && 'delete'", workflow)
-        self.assertIn('if action == "build" and not preview_authorized', source)
 
 
 if __name__ == "__main__":

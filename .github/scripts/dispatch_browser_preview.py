@@ -81,17 +81,6 @@ def current(repo, number, action, sha, token):
         pr.get("head", {}).get("sha") == sha
 
 
-def preview_authorized(base_repository, head_repository, labels):
-    """Same-repository PRs pass automatically; fork PRs need an approval label."""
-    if (isinstance(base_repository, str) and isinstance(head_repository, str) and
-            head_repository and base_repository.lower() == head_repository.lower()):
-        return True
-    return isinstance(labels, list) and any(
-        isinstance(label, dict) and label.get("name") == "preview-approved"
-        for label in labels
-    )
-
-
 def result_text(status, short_sha, preview, simulator):
     repo = re.escape(simulator)
     run = status.get("run_url", "")
@@ -111,18 +100,6 @@ def result_text(status, short_sha, preview, simulator):
     if status["status"] == "deleted":
         return f"🧪 Specter PR Build · {short_sha} 🗑️\n\nPreview removed because this PR was closed."
     raise ValueError("unsupported status")
-
-
-def _labels_from_environment():
-    try:
-        labels = json.loads(os.environ.get("PR_LABELS_JSON", "[]"))
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(labels, list) or any(
-            not isinstance(label, dict) or not isinstance(label.get("name"), str)
-            for label in labels):
-        return None
-    return labels
 
 
 def _comment_if_current(repo, number, action, sha, token, text):
@@ -150,15 +127,9 @@ def main():
     preview, status_url = root + f"pr/{number}/", root + f"status/pr/{number}.json"
 
     # A failed metadata lookup (None) must never authorize a status comment or
-    # a privileged remote dispatch. Close requests are verified against the
-    # live closed PR state but intentionally skip the approval-label gate.
+    # a privileged remote dispatch. Fork and same-repository PRs follow the
+    # same verified path; the build job remains isolated from repository writes.
     if current(base, number, action, sha, token) is not True:
-        return
-
-    if action == "build" and not preview_authorized(
-            base, os.environ.get("HEAD_REPOSITORY", ""), _labels_from_environment()):
-        comment(base, number, token,
-                f"🧪 Specter PR Build · {short} ⏸️\n\nA maintainer must add the `preview-approved` label before a fork PR preview can run.")
         return
 
     if not os.environ.get("WEB_SIMULATOR_DISPATCH_TOKEN"):
