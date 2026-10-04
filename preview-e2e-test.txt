@@ -1,1 +1,1 @@
-Temporary test input for the paired Specter browser preview E2E lifecycle (comment-token verification).
+Temporary test input for the paired Specter browser preview E2E lifecycle (safe GitHub API error diagnostics).
