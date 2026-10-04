@@ -1,1 +1,1 @@
-Temporary test input for the paired Specter browser preview E2E lifecycle.
+Temporary test input for the paired Specter browser preview E2E lifecycle (verification rerun).
