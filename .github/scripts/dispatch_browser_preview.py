@@ -42,7 +42,10 @@ def gh(method, path, token="", data=None):
         with urlopen(Request(API + path, data=raw, headers=headers, method=method), timeout=25) as response:
             result = response.read()
             return json.loads(result) if result else None
-    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError):
+    except HTTPError as exc:
+        endpoint = path.split("?", 1)[0]
+        raise RuntimeError(f"GitHub API {method} {endpoint} returned HTTP {exc.code}") from exc
+    except (URLError, TimeoutError, json.JSONDecodeError):
         raise RuntimeError("GitHub API request failed")
 
 
@@ -210,5 +213,5 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as exc:
-        print(f"Browser preview dispatcher failed: {type(exc).__name__}", file=sys.stderr)
+        print(f"Browser preview dispatcher failed: {type(exc).__name__}: {exc}", file=sys.stderr)
         sys.exit(1)

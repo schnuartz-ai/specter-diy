@@ -2,6 +2,8 @@
 """Unit tests for preview dispatch authorization, comments, and timeout contracts."""
 from pathlib import Path
 from unittest.mock import patch
+from urllib.error import HTTPError
+from io import BytesIO
 import json
 import os
 import sys
@@ -15,6 +17,16 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class BrowserPreviewDispatcherTests(unittest.TestCase):
+    def test_api_http_error_reports_status_without_response_body(self):
+        error = HTTPError("https://api.github.com/private", 403, "denied", {},
+                          BytesIO(b"sensitive server detail"))
+        with patch.object(dispatcher, "urlopen", side_effect=error):
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    r"POST /repos/example/repo/issues/1/comments returned HTTP 403") as raised:
+                dispatcher.gh("POST", "/repos/example/repo/issues/1/comments", "token", {})
+        self.assertNotIn("sensitive server detail", str(raised.exception))
+
     def test_fork_pr_dispatches_without_approval_label(self):
         workflow = (ROOT / ".github/workflows/browser-preview.yml").read_text()
         source = (ROOT / ".github/scripts/dispatch_browser_preview.py").read_text()
