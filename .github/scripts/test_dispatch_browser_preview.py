@@ -27,6 +27,18 @@ class BrowserPreviewDispatcherTests(unittest.TestCase):
                 dispatcher.gh("POST", "/repos/example/repo/issues/1/comments", "token", {})
         self.assertNotIn("sensitive server detail", str(raised.exception))
 
+    def test_api_http_error_reports_github_message_without_raw_body(self):
+        error = HTTPError(
+            "https://api.github.com/private", 403, "denied", {},
+            BytesIO(b'{"message":"Resource not accessible by personal access token",'
+                    b'"documentation_url":"https://example.test/private"}'))
+        with patch.object(dispatcher, "urlopen", side_effect=error):
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    r"HTTP 403: Resource not accessible by personal access token") as raised:
+                dispatcher.gh("POST", "/repos/example/repo/issues/1/comments", "token", {})
+        self.assertNotIn("example.test", str(raised.exception))
+
     def test_comment_token_falls_back_to_workflow_token_when_unset(self):
         with patch.dict(os.environ, {}, clear=True):
             self.assertEqual(dispatcher.comment_auth_token("workflow-token"), "workflow-token")

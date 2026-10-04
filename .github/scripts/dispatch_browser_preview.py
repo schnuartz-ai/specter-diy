@@ -44,7 +44,17 @@ def gh(method, path, token="", data=None):
             return json.loads(result) if result else None
     except HTTPError as exc:
         endpoint = path.split("?", 1)[0]
-        raise RuntimeError(f"GitHub API {method} {endpoint} returned HTTP {exc.code}") from exc
+        message = ""
+        try:
+            payload = json.loads(exc.read(4096))
+            if isinstance(payload, dict) and isinstance(payload.get("message"), str):
+                message = re.sub(r"[^A-Za-z0-9 .,:'/_-]", "", payload["message"])[:180]
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            pass
+        detail = f": {message}" if message else ""
+        raise RuntimeError(
+            f"GitHub API {method} {endpoint} returned HTTP {exc.code}{detail}"
+        ) from exc
     except (URLError, TimeoutError, json.JSONDecodeError):
         raise RuntimeError("GitHub API request failed")
 
