@@ -1,1 +1,1 @@
-Temporary test input for the paired Specter browser preview E2E lifecycle (trusted runtime metadata and run-scoped comment verification).
+Temporary test input for the paired Specter browser preview E2E lifecycle (trusted runtime metadata and PR comment permission verification).
