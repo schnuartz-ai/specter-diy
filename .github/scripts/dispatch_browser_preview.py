@@ -84,6 +84,11 @@ def pages_root(repo):
     return f"https://{host}/" + ("" if name.lower() == host else f"{name}/")
 
 
+def comment_auth_token(workflow_token):
+    """Use a fork-specific comment token when configured; otherwise GITHUB_TOKEN."""
+    return os.environ.get("SPECTER_PREVIEW_COMMENT_TOKEN", "").strip() or workflow_token
+
+
 def current(repo, number, action, sha, token, base_sha=None, base_ref=None):
     try:
         pr = gh("GET", f"/repos/{repo}/pulls/{number}", token)
@@ -116,9 +121,10 @@ def result_text(status, short_sha, preview, simulator):
     raise ValueError("unsupported status")
 
 
-def _comment_if_current(repo, number, action, sha, token, text, base_sha=None, base_ref=None):
+def _comment_if_current(repo, number, action, sha, token, text, base_sha=None, base_ref=None,
+                        comment_token=None):
     if current(repo, number, action, sha, token, base_sha, base_ref) is True:
-        comment(repo, number, token, text)
+        comment(repo, number, comment_token or token, text)
         return True
     return False
 
@@ -139,6 +145,7 @@ def main():
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", simulator):
         raise ValueError("invalid paired repository")
     token = os.environ["GITHUB_TOKEN"]
+    comment_token = comment_auth_token(token)
     short = sha[:7]
     request_id = f"specter-pr-{number}-{sha}-{os.environ['GITHUB_RUN_ID']}-{os.environ['GITHUB_RUN_ATTEMPT']}"
     root = pages_root(simulator)
@@ -154,7 +161,7 @@ def main():
         _comment_if_current(
             base, number, action, sha, token,
             f"🧪 Specter PR Build · {short} ⚠️\n\nConfigure the paired Web Simulator and `WEB_SIMULATOR_DISPATCH_TOKEN` secret.",
-            base_sha, base_ref)
+            base_sha, base_ref, comment_token=comment_token)
         return
     try:
         service = gh("GET", f"/repos/{simulator}")
@@ -169,13 +176,13 @@ def main():
         _comment_if_current(
             base, number, action, sha, token,
             f"🧪 Specter PR Build · {short} ⚠️\n\nThe paired Web Simulator could not start ({type(exc).__name__}). Check Actions settings and the secret's Actions: write permission.",
-            base_sha, base_ref)
+            base_sha, base_ref, comment_token=comment_token)
         return
 
     note = "Removing the preview for this closed PR." if action == "delete" else "Browser simulator and firmware are being built."
     _comment_if_current(base, number, action, sha, token,
                         f"🧪 Specter PR Build · {short} ⏳\n\n{note}\n\nSource commit: `{short}`",
-                        base_sha, base_ref)
+                        base_sha, base_ref, comment_token=comment_token)
     deadline, delay = monotonic() + POLL_TIMEOUT_MINUTES * 60, 10
     while monotonic() < deadline:
         state = current(base, number, action, sha, token, base_sha, base_ref)
@@ -197,7 +204,7 @@ def main():
             if state is False:
                 return
             if state is True:
-                comment(base, number, token, text)
+                comment(base, number, comment_token, text)
                 return
             # An API error is unknown, not proof that this result is current.
             # Keep polling and retry verification instead of writing a comment.
@@ -206,7 +213,7 @@ def main():
     _comment_if_current(
         base, number, action, sha, token,
         f"🧪 Specter PR Build · {short} ⚠️\n\nThe remote Web Simulator did not return a matching result in time. Check its Actions page or rerun the preview.",
-        base_sha, base_ref)
+        base_sha, base_ref, comment_token=comment_token)
 
 
 if __name__ == "__main__":
