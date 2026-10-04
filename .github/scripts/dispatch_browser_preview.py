@@ -12,14 +12,23 @@ import sys
 API = "https://api.github.com"
 MARKER = "<!-- specter-web-simulator-preview -->"
 
-# Keep these values in sync with the paired Web Simulator workflow. The
-# dispatch caller allows the 5m validate + 180m build + 10m finalize chain,
-# along with a small scheduling and polling buffer.
+# Keep these values in sync with the paired Web Simulator workflow. Its
+# critical path is validate + max(build, trusted_runtime) + verify + finalize.
+# Current limits total 315m; polling adds 15m, and the caller has 30m more.
 REMOTE_VALIDATE_TIMEOUT_MINUTES = 5
 REMOTE_BUILD_TIMEOUT_MINUTES = 180
+REMOTE_RUNTIME_TIMEOUT_MINUTES = 180
+REMOTE_VERIFY_TIMEOUT_MINUTES = 120
 REMOTE_FINALIZE_TIMEOUT_MINUTES = 10
-POLL_TIMEOUT_MINUTES = 210
-CALLER_WORKFLOW_TIMEOUT_MINUTES = 240
+REMOTE_SCHEDULING_ALLOWANCE_MINUTES = 15
+REMOTE_CHAIN_TIMEOUT_MINUTES = (
+    REMOTE_VALIDATE_TIMEOUT_MINUTES
+    + max(REMOTE_BUILD_TIMEOUT_MINUTES, REMOTE_RUNTIME_TIMEOUT_MINUTES)
+    + REMOTE_VERIFY_TIMEOUT_MINUTES
+    + REMOTE_FINALIZE_TIMEOUT_MINUTES
+)
+POLL_TIMEOUT_MINUTES = REMOTE_CHAIN_TIMEOUT_MINUTES + REMOTE_SCHEDULING_ALLOWANCE_MINUTES
+CALLER_WORKFLOW_TIMEOUT_MINUTES = 360
 
 
 def gh(method, path, token="", data=None):

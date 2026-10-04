@@ -121,18 +121,37 @@ class BrowserPreviewDispatcherTests(unittest.TestCase):
         self.assertEqual(len(patch_calls), 1)
         self.assertEqual(patch_calls[0][1], "/repos/cryptoadvance/specter-diy/issues/comments/900")
 
-    def test_timeout_constants_fit_remote_chain_and_caller_workflow(self):
+    def test_timeout_constants_cover_the_complete_remote_chain(self):
         self.assertEqual(dispatcher.REMOTE_VALIDATE_TIMEOUT_MINUTES, 5)
         self.assertEqual(dispatcher.REMOTE_BUILD_TIMEOUT_MINUTES, 180)
+        self.assertEqual(dispatcher.REMOTE_RUNTIME_TIMEOUT_MINUTES, 180)
+        self.assertEqual(dispatcher.REMOTE_VERIFY_TIMEOUT_MINUTES, 120)
         self.assertEqual(dispatcher.REMOTE_FINALIZE_TIMEOUT_MINUTES, 10)
-        self.assertGreater(dispatcher.POLL_TIMEOUT_MINUTES,
-                            dispatcher.REMOTE_VALIDATE_TIMEOUT_MINUTES +
-                            dispatcher.REMOTE_BUILD_TIMEOUT_MINUTES +
-                            dispatcher.REMOTE_FINALIZE_TIMEOUT_MINUTES)
+
+        expected_chain = (
+            dispatcher.REMOTE_VALIDATE_TIMEOUT_MINUTES
+            + max(dispatcher.REMOTE_BUILD_TIMEOUT_MINUTES,
+                  dispatcher.REMOTE_RUNTIME_TIMEOUT_MINUTES)
+            + dispatcher.REMOTE_VERIFY_TIMEOUT_MINUTES
+            + dispatcher.REMOTE_FINALIZE_TIMEOUT_MINUTES
+        )
+        self.assertEqual(expected_chain, 315)
+        self.assertEqual(dispatcher.REMOTE_CHAIN_TIMEOUT_MINUTES, expected_chain)
+        self.assertEqual(dispatcher.REMOTE_SCHEDULING_ALLOWANCE_MINUTES, 15)
+        self.assertEqual(dispatcher.POLL_TIMEOUT_MINUTES,
+                         expected_chain + dispatcher.REMOTE_SCHEDULING_ALLOWANCE_MINUTES)
+        self.assertEqual(dispatcher.POLL_TIMEOUT_MINUTES, 330)
+        self.assertEqual(dispatcher.CALLER_WORKFLOW_TIMEOUT_MINUTES, 360)
         self.assertLess(dispatcher.POLL_TIMEOUT_MINUTES,
                         dispatcher.CALLER_WORKFLOW_TIMEOUT_MINUTES)
+
         workflow = (ROOT / ".github/workflows/browser-preview.yml").read_text()
         self.assertIn(f"timeout-minutes: {dispatcher.CALLER_WORKFLOW_TIMEOUT_MINUTES}", workflow)
+
+    def test_base_branch_edits_trigger_preview_revalidation(self):
+        workflow = (ROOT / ".github/workflows/browser-preview.yml").read_text()
+        trigger_types = next(line for line in workflow.splitlines() if "types:" in line)
+        self.assertIn("edited", trigger_types)
 
     def test_close_cleanup_remains_wired_without_label_trigger(self):
         workflow = (ROOT / ".github/workflows/browser-preview.yml").read_text()
