@@ -378,6 +378,6 @@ sign something you didn't confirm on the device screen.
 
 ## Reporting vulnerabilities
 
-Please see [`SECURITY.md`](../SECURITY.md) in the repository root for
+Please see [`SECURITY.md`](https://github.com/cryptoadvance/specter-diy/blob/master/SECURITY.md) in the repository root for
 how to report a vulnerability (contact e-mail, GPG keys for encrypted
 reports, scope and disclosure process).

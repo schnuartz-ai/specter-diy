@@ -3,7 +3,7 @@
 This document lists all data persisted by Specter-DIY, where it is stored,
 and how it is protected. It reflects the current implementation in `src/`
 (keystore, hosts, apps) — if you find a mismatch, please report it (see
-[`SECURITY.md`](../SECURITY.md)).
+[`SECURITY.md`](https://github.com/cryptoadvance/specter-diy/blob/master/SECURITY.md)).
 
 ## Storage Areas
 
