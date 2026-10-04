@@ -45,6 +45,7 @@ class BrowserPreviewDispatcherTests(unittest.TestCase):
         self.assertIn("closed", workflow)
         self.assertIn("github.event.action == 'closed' && 'delete'", workflow)
         self.assertIn("  issues: write", workflow)
+        self.assertIn("  pull-requests: write", workflow)
         self.assertNotIn("preview-approved", workflow + source)
         self.assertNotIn("PR_LABELS_JSON", workflow + source)
         self.assertNotIn("SPECTER_PREVIEW_COMMENT_TOKEN", workflow + source)
