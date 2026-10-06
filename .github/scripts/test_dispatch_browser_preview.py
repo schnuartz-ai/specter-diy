@@ -45,7 +45,8 @@ class BrowserPreviewDispatcherTests(unittest.TestCase):
         self.assertIn("closed", workflow)
         self.assertIn("github.event.action == 'closed' && 'delete'", workflow)
         self.assertIn("  issues: write", workflow)
-        self.assertIn("  pull-requests: write", workflow)
+        self.assertIn("  pull-requests: read", workflow)
+        self.assertNotIn("  pull-requests: write", workflow)
         self.assertNotIn("preview-approved", workflow + source)
         self.assertNotIn("PR_LABELS_JSON", workflow + source)
         self.assertNotIn("SPECTER_PREVIEW_COMMENT_TOKEN", workflow + source)
@@ -179,10 +180,10 @@ class BrowserPreviewDispatcherTests(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/browser-preview.yml").read_text()
         self.assertIn(f"timeout-minutes: {dispatcher.CALLER_WORKFLOW_TIMEOUT_MINUTES}", workflow)
 
-    def test_base_branch_edits_trigger_preview_revalidation(self):
+    def test_pr_edits_do_not_trigger_preview_builds(self):
         workflow = (ROOT / ".github/workflows/browser-preview.yml").read_text()
         trigger_types = next(line for line in workflow.splitlines() if "types:" in line)
-        self.assertIn("edited", trigger_types)
+        self.assertNotIn("edited", trigger_types)
 
     def test_close_cleanup_remains_wired_without_label_trigger(self):
         workflow = (ROOT / ".github/workflows/browser-preview.yml").read_text()
