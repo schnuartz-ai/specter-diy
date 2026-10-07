@@ -44,7 +44,7 @@ class BrowserPreviewDispatcherTests(unittest.TestCase):
         source = (ROOT / ".github/scripts/dispatch_browser_preview.py").read_text()
         self.assertIn("closed", workflow)
         self.assertIn("github.event.action == 'closed' && 'delete'", workflow)
-        self.assertIn("  issues: write", workflow)
+        self.assertNotIn("  issues: write", workflow)
         self.assertIn("  pull-requests: write", workflow)
         self.assertNotIn("  pull-requests: read", workflow)
         self.assertNotIn("preview-approved", workflow + source)
