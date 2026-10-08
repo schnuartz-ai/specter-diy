@@ -8,7 +8,7 @@ on:
 
 jobs:
   native-preview-check:
-    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 10 }}
+    if: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.number == 10 }}
     name: Specter Browser Preview (native Actions control)
     runs-on: ubuntu-latest
     permissions:
@@ -25,10 +25,7 @@ jobs:
 
   checks-api-probe:
     if: >-
-      ${{ github.event_name == 'pull_request_target' &&
-          github.event.pull_request.number == 10 &&
-          github.event.pull_request.base.repo.full_name == 'schnuartz-ai/specter-diy' &&
-          github.event.pull_request.head.repo.full_name == 'cryptoadvance/specter-diy' }}
+      ${{ false }}
     name: Create custom checks via API (test only)
     runs-on: ubuntu-latest
     timeout-minutes: 5
