@@ -11,9 +11,54 @@ jobs:
     name: Build Firmware
     runs-on: ubuntu-latest
     steps:
+      # Pull request checkout defaults to the synthetic merge commit. Build the
+      # exact PR head so the ZIP's SHA identifies the firmware actually built.
       - uses: actions/checkout@v3
         with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
+          persist-credentials: false
+
+      - name: Name firmware from source repository and checked-out commit
+        id: firmware_name
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_SOURCE_OWNER: ${{ github.event.pull_request.head.repo.owner.login }}
+          PR_SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          commit="$(git rev-parse HEAD)"
+          if [[ ! "$commit" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Invalid checked-out commit SHA" >&2
+            exit 1
+          fi
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            if [[ "$commit" != "$PR_SOURCE_SHA" || ! "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+              echo "PR checkout does not match the exact source commit" >&2
+              exit 1
+            fi
+            owner="$PR_SOURCE_OWNER"
+            identifier="PR-$PR_NUMBER"
+          else
+            owner="$REPOSITORY_OWNER"
+            identifier="$REF_NAME"
+          fi
+          if [[ ! "$owner" =~ ^[A-Za-z0-9][A-Za-z0-9-]*$ || ! "$identifier" =~ ^[A-Za-z0-9][A-Za-z0-9-]*$ || ! "$RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Invalid firmware artifact metadata" >&2
+            exit 1
+          fi
+          name="specter-firmware_${owner}_${identifier}_${commit:0:12}"
+          # GitHub Actions v4 artifacts are immutable within one workflow run.
+          if (( RUN_ATTEMPT > 1 )); then
+            name+="_attempt-$RUN_ATTEMPT"
+          fi
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "Firmware artifact: ${name}.zip"
       
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@v14
@@ -37,7 +82,8 @@ jobs:
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: firmware-binaries
+          name: ${{ steps.firmware_name.outputs.name }}
+          retention-days: 90
           path: |
             bin/specter-diy.bin
             bin/specter-diy.hex
