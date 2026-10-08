@@ -1,0 +1,47 @@
+name: Fork Browser Preview Check (prototype)
+
+# Fork-only proof: read trusted Pages status and reproduce the preview comment
+# as a GitHub Check. A future simulator-side Checks App can trigger this
+# asynchronously; this prototype uses edited or manual workflow dispatch.
+on:
+  pull_request_target:
+    types: [edited]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Open fork PR number to refresh
+        required: true
+        type: number
+
+permissions:
+  contents: read
+  pull-requests: read
+  checks: write
+
+concurrency:
+  group: fork-preview-check-${{ github.event.pull_request.number || inputs.pr_number }}
+  cancel-in-progress: true
+
+jobs:
+  report:
+    name: Publish Specter Browser Preview details
+    if: >-
+      github.repository == 'schnuartz-ai/specter-diy' &&
+      (github.event_name == 'workflow_dispatch' ||
+       github.event.pull_request.number == 4 ||
+       github.event.pull_request.number == 10)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out trusted fork default branch only
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4 pinned
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Unit-test the check Markdown and URL validation
+        run: python3 .github/scripts/test_fork_preview_check.py
+      - name: Create or update a single check on the live PR commit
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PREVIEW_PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+        run: python3 .github/scripts/fork_preview_check.py
