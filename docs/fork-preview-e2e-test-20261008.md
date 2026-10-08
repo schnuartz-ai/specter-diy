@@ -11,3 +11,7 @@ Expected test behavior:
 - Never modify any PR outside the schnuartz-ai fork.
 
 DO NOT MERGE this test pull request.
+
+Footer E2E assertion: Under-device firmware provenance footer shows the
+firmware version and short source SHA, separated by a middle dot, and links
+to that exact source commit. The bot must PATCH its existing comment.
