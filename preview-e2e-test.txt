@@ -1,1 +1,2 @@
 Temporary test input for the paired Specter browser preview E2E lifecycle (trusted runtime metadata and PR comment permission verification).
+Verify preview cleanup with a new source SHA (2026-10-08).
