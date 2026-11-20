@@ -257,7 +257,7 @@ class Specter:
         ]
         if self.keystore.is_key_saved and self.keystore.load_button:
             buttons.append((2, self.keystore.load_button))
-        buttons += [(None, "Settings"), (3, "Device settings")]
+        buttons += [(None, "Settings"), (3, "Device settings"), (6, "About this device")]
         # wait for menu selection
         menuitem = await self.gui.menu(buttons)
 
@@ -285,6 +285,8 @@ class Specter:
             return self.mainmenu
         elif menuitem == 3:
             await self.update_devsettings()
+        elif menuitem == 6:
+            await self.show_about()
         elif menuitem == 777:
             return await self.import_mnemonic()
         # lock device
@@ -403,7 +405,6 @@ class Specter:
         if hasattr(self.keystore, "show_mnemonic"):
             buttons.append((3, "Show recovery phrase"))
         buttons.extend([(None, "Security"), (4, "Device settings")])  # delimiter
-        buttons.extend([(None, "About"), (6, "About this device")])
         # wait for menu selection
         menuitem = await self.gui.menu(buttons, last=(255, None), note=self._firmware_note())
 
@@ -428,8 +429,6 @@ class Specter:
             await self.update_devsettings()
         elif menuitem == 5:
             await self.select_network()
-        elif menuitem == 6:
-            await self.show_about()
         else:
             print(menuitem)
             raise SpecterError("Not implemented")
@@ -570,7 +569,6 @@ class Specter:
             # (3, "Experimental"),
         ] + [
             (None, "Global settings"),
-            (42, "About this device"),
         ]
         if hasattr(self.keystore, "lock"):
             buttons.extend([(777, "Change PIN code")])
@@ -607,9 +605,6 @@ class Specter:
                 return
             elif menuitem == 777:
                 await self.keystore.change_pin()
-                return
-            elif menuitem == 42:
-                await self.show_about()
                 return
             elif menuitem == 1:
                 await self.communication_settings()
