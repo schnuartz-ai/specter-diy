@@ -257,7 +257,7 @@ class Specter:
         ]
         if self.keystore.is_key_saved and self.keystore.load_button:
             buttons.append((2, self.keystore.load_button))
-        buttons += [(None, "Settings"), (3, "Device settings"), (6, "About this device")]
+        buttons += [(None, "Settings"), (3, "Device settings")]
         # wait for menu selection
         menuitem = await self.gui.menu(buttons)
 
@@ -285,8 +285,6 @@ class Specter:
             return self.mainmenu
         elif menuitem == 3:
             await self.update_devsettings()
-        elif menuitem == 6:
-            await self.show_about()
         elif menuitem == 777:
             return await self.import_mnemonic()
         # lock device
@@ -575,6 +573,7 @@ class Specter:
         buttons += [
             (456, "Reboot"),
             (123, "Wipe the device", True, 0x951E2D),
+            (42, "About this device"),
         ]
         while True:
             menuitem = await self.gui.menu(buttons,
@@ -605,6 +604,9 @@ class Specter:
                 return
             elif menuitem == 777:
                 await self.keystore.change_pin()
+                return
+            elif menuitem == 42:
+                await self.show_about()
                 return
             elif menuitem == 1:
                 await self.communication_settings()
