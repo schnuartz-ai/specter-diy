@@ -1,0 +1,18 @@
+{
+  "profile": "pre-rev3",
+  "published": "2026-11-21T19:17:25Z",
+  "publishedAt": "2026-11-21T19:17:25Z",
+  "sha256": {
+    "bootloader.bin": "08cb361b0ed9fbab2ff03904aa90953b8695efb92330c70a940e1550dd8b9f3a",
+    "micropython.bin": "b278cc0e0968dad19160b16bcf2e3a7281be593c546666fa1961cca0ca1f237b",
+    "partition-table.bin": "37bd063033fb0478ccf799d74052c35ffb9c51ccacb8ab4b50c255dec5b6334b",
+    "storage-reset.bin": "7d2c7ac4888bfd75cd5f56e8d61f69595121183afc81556c876732fd3782c62f"
+  },
+  "source_commit": "ba3eb9b6e50ad89367c87cd31327f4a36635aa3e",
+  "source_url": "https://github.com/Schnuartz/specter-diy/commit/ba3eb9b6e50ad89367c87cd31327f4a36635aa3e",
+  "tag": "ESP32-P4 integration build \u00b7 Smartcard HAT (UART2 fix)",
+  "tagName": "ESP32-P4 integration build \u00b7 Smartcard HAT (UART2 fix)",
+  "url": "https://github.com/Schnuartz/specter-diy/tree/codex/esp32p4-smartcard-hat",
+  "zip": "specter-diy-wave_43-integration.zip",
+  "zip_sha256": "141ff85ec0bc76b830506c8a5edd5c294632148f56bae5602cb7ce968cbbc644"
+}
