@@ -142,27 +142,251 @@ def current(request, token, pull_fetcher=None):
     return True
 
 
-def dispatch(request, simulator, token, github=None):
-    github = github or gh
-    service = github("GET", f"/repos/{simulator}", token)
-    default_branch = service.get("default_branch") if isinstance(service, dict) else None
-    if not isinstance(default_branch, str) or not valid_ref(default_branch):
-        raise RuntimeError("Web Simulator repository has no valid default branch")
-    inputs = {key: str(value) for key, value in request.items()}
-    github("POST", f"/repos/{simulator}/actions/workflows/preview.yml/dispatches", token,
-           {"ref": default_branch, "inputs": inputs})
+# Only an authenticated repository writer can manually run a build. Approving
+# the native CI run uses GitHub's own workflow permission gate instead.
+ONCE_COMMAND = "/build"
+AUTO_COMMAND = "/build-auto"
+LOGIN_RE = re.compile(r"[A-Za-z0-9-]{1,39}\Z")
+CI_WORKFLOW = ".github/workflows/test.yml"
+SIMULATOR_WORKFLOW = "preview.yml"
+APPROVAL_WORKFLOW = "approval.yml"
+
+
+def has_write_access(repository, username, token):
+    """Never trust comment text, author_association, or an unchecked username."""
+    if not isinstance(username, str) or not LOGIN_RE.fullmatch(username):
+        return False
+    try:
+        permission = gh("GET", f"/repos/{repository}/collaborators/{username}/permission", token)
+    except RuntimeError as exc:
+        # GitHub returns 404 when the commenter is not a collaborator.
+        if "HTTP 404" in str(exc):
+            return False
+        raise
+    return isinstance(permission, dict) and permission.get("permission") in (
+        "write", "maintain", "admin"
+    )
+
+
+def is_maintainer_command(repository, number, comment, token):
+    if not isinstance(comment, dict):
+        return False
+    if comment.get("issue_url") != f"{API}/repos/{repository}/issues/{number}":
+        return False
+    command = (comment.get("body") or "").strip().lower()
+    if command not in (ONCE_COMMAND, AUTO_COMMAND):
+        return False
+    if command == AUTO_COMMAND:
+        # Edited comments must not silently turn into durable approvals.
+        created, updated = comment.get("created_at"), comment.get("updated_at")
+        if not created or not updated or parse_time(created) != parse_time(updated):
+            return False
+    return has_write_access(repository, (comment.get("user") or {}).get("login"), token)
+
+
+def request_environment_for_pr(env, pr):
+    """Reconstruct all PR fields from GitHub rather than an untrusted event."""
+    base, head = pr.get("base") or {}, pr.get("head") or {}
+    result = dict(env)
+    result.update({
+        "BASE_SHA": base.get("sha", ""),
+        "BASE_REF": base.get("ref", ""),
+        "HEAD_SHA": head.get("sha", ""),
+        "HEAD_REF": head.get("ref", ""),
+        "HEAD_REPOSITORY": (head.get("repo") or {}).get("full_name", ""),
+        "SOURCE_UPDATED_AT": pr.get("updated_at", ""),
+    })
+    return result
+
+
+def comment_command_valid(env, token):
+    repository = env["BASE_REPOSITORY"]
+    if not REPOSITORY_RE.fullmatch(repository) or repository.rsplit("/", 1)[1].lower() != "specter-diy":
+        raise ValueError("invalid Specter repository")
+    number, comment_id = int(env["PR_NUMBER"]), int(env["COMMENT_ID"])
+    if not 1 <= number <= 9999999 or comment_id <= 0:
+        raise ValueError("invalid PR/comment ID")
+    comment = gh("GET", f"/repos/{repository}/issues/comments/{comment_id}", token)
+    if not is_maintainer_command(repository, number, comment, token):
+        return None
+    return (comment.get("body") or "").strip().lower()
+
+
+def _issue_open_epoch(repository, number, pr, token):
+    """Use GitHub's PR timeline so a reopened PR loses prior auto approvals."""
+    epoch = parse_time(pr["created_at"])
+    for page in range(1, 21):
+        events = gh("GET", f"/repos/{repository}/issues/{number}/events?per_page=100&page={page}", token)
+        if not isinstance(events, list):
+            raise ValueError("invalid issue events response")
+        for event in events:
+            if event.get("event") == "reopened":
+                epoch = max(epoch, parse_time(event["created_at"]))
+        if len(events) < 100:
+            return epoch
+    # Fail closed if the issue history exceeds the bounded API scan.
+    raise ValueError("PR has too many issue events to verify automatic approval")
+
+
+def auto_build_approved(repository, number, pr, token):
+    """Durable for one open epoch only; no database or GitHub labels needed."""
+    if pr.get("state") != "open":
+        return False
+    candidates = []
+    for page in range(1, 21):
+        comments = gh("GET", f"/repos/{repository}/issues/{number}/comments?per_page=100&page={page}", token)
+        if not isinstance(comments, list):
+            raise ValueError("invalid issue comments response")
+        for comment in comments:
+            if (isinstance(comment, dict) and
+                    (comment.get("body") or "").strip().lower() == AUTO_COMMAND and
+                    comment.get("issue_url") == f"{API}/repos/{repository}/issues/{number}"):
+                candidates.append(comment)
+        if len(comments) < 100:
+            break
+    else:
+        raise ValueError("PR has too many comments to verify automatic approval")
+    if not candidates:
+        return False
+    epoch = _issue_open_epoch(repository, number, pr, token)
+    for comment in candidates:
+        created, updated = comment.get("created_at"), comment.get("updated_at")
+        if (not created or not updated or
+                parse_time(created) != parse_time(updated) or
+                parse_time(created) <= epoch):
+            continue
+        if is_maintainer_command(repository, number, comment, token):
+            return True
+    return False
+
+
+def dispatch_to_service(request, simulator, token, workflow=SIMULATOR_WORKFLOW):
+    service = gh("GET", f"/repos/{simulator}", token)
+    branch = service.get("default_branch") if isinstance(service, dict) else None
+    if not isinstance(branch, str) or not valid_ref(branch):
+        raise RuntimeError("Web Simulator has no valid default branch")
+    if workflow == SIMULATOR_WORKFLOW:
+        inputs = {key: str(value) for key, value in request.items()}
+    elif workflow == APPROVAL_WORKFLOW:
+        inputs = {
+            "pr_number": str(request["pr_number"]),
+            "head_sha": request["head_sha"],
+            "source_updated_at": request["source_updated_at"],
+        }
+    else:
+        raise ValueError("unsupported service workflow")
+    gh("POST", f"/repos/{simulator}/actions/workflows/{workflow}/dispatches", token,
+       {"ref": branch, "inputs": inputs})
+
+
+def find_pr_for_ci(repository, run, token):
+    """Look up live open PRs; fork workflow_run.pull_requests can be empty."""
+    sha = run.get("head_sha")
+    head_repository = (run.get("head_repository") or {}).get("full_name", "")
+    if not isinstance(sha, str) or not SHA_RE.fullmatch(sha):
+        return None
+    for page in range(1, 6):
+        pulls = gh("GET", f"/repos/{repository}/pulls?state=open&per_page=100&page={page}", token)
+        if not isinstance(pulls, list):
+            raise ValueError("invalid pull request search result")
+        for pr in pulls:
+            head = pr.get("head") or {}
+            if (head.get("sha") == sha and
+                    (head.get("repo") or {}).get("full_name", "").lower() == head_repository.lower()):
+                return pr
+        if len(pulls) < 100:
+            break
+    return None
+
+
+def approved_ci_pr(env, token):
+    """Only a started native PR CI run authorizes automatic preview dispatch."""
+    repository = env["BASE_REPOSITORY"]
+    run_id = int(env["CI_RUN_ID"])
+    if run_id <= 0:
+        raise ValueError("invalid CI workflow ID")
+    run = gh("GET", f"/repos/{repository}/actions/runs/{run_id}", token)
+    if (not isinstance(run, dict) or run.get("id") != run_id or
+            (run.get("repository") or {}).get("full_name", "").lower() != repository.lower() or
+            run.get("name") != "CI" or run.get("event") != "pull_request" or
+            not (run.get("path") == CI_WORKFLOW or
+                 str(run.get("path", "")).startswith(CI_WORKFLOW + "@"))):
+        return None
+    if run.get("status") not in ("queued", "in_progress") and not (
+        run.get("status") == "completed" and
+        run.get("conclusion") in ("success", "failure", "timed_out")
+    ):
+        return None
+    pr = find_pr_for_ci(repository, run, token)
+    if not pr or pr.get("state") != "open":
+        return None
+    number = pr.get("number")
+    if type(number) is not int or number <= 0:
+        return None
+    return number, pr
 
 
 def main():
-    request = request_from_environment(os.environ)
-    token = os.environ["GITHUB_TOKEN"]
-    if not current(request, token):
+    env = dict(os.environ)
+    token = env["GITHUB_TOKEN"]
+    event_name = env.get("EVENT_NAME", "")
+    if event_name not in ("pull_request_target", "issue_comment", "workflow_run", "workflow_dispatch"):
         return
-    simulator = os.environ.get("WEB_SIMULATOR_REPOSITORY", "").strip()
+    repository = env["BASE_REPOSITORY"]
+    if (not REPOSITORY_RE.fullmatch(repository) or
+            repository.rsplit("/", 1)[1].lower() != "specter-diy"):
+        raise ValueError("invalid Specter repository")
+
+    action = "build"
+    if event_name == "issue_comment":
+        command = comment_command_valid(env, token)
+        if command is None:
+            return
+        number = int(env["PR_NUMBER"])
+        pr = gh("GET", f"/repos/{repository}/pulls/{number}", token)
+    elif event_name == "workflow_run":
+        checked = approved_ci_pr(env, token)
+        if checked is None:
+            return
+        number, pr = checked
+        # The pull_request_target synchronize event owns builds for auto-approved
+        # PRs. Avoid dispatching the same SHA again when native CI also starts.
+        if auto_build_approved(repository, number, pr, token):
+            return
+    else:
+        number = int(env["PR_NUMBER"])
+        if event_name == "workflow_dispatch" and not has_write_access(
+                repository, env.get("GITHUB_ACTOR", ""), token):
+            return
+        pr = gh("GET", f"/repos/{repository}/pulls/{number}", token)
+        if event_name == "pull_request_target" and env.get("ACTION") == "delete":
+            action = "delete"
+
+    if not isinstance(pr, dict) or pr.get("number") != number:
+        return
+    env["PR_NUMBER"] = str(number)
+    env["ACTION"] = action
+    env = request_environment_for_pr(env, pr)
+    request = request_from_environment(env)
+    if not current(request, token, lambda *_: pr):
+        return
+
+    simulator = env.get("WEB_SIMULATOR_REPOSITORY", "").strip()
     if not simulator:
-        simulator = f"{request['base_repository'].split('/', 1)[0]}/specter-diy-web-simulator"
-    dispatch(request, simulator,
-             os.environ["WEB_SIMULATOR_DISPATCH_TOKEN"])
+        simulator = f"{repository.split('/', 1)[0]}/specter-diy-web-simulator"
+    # Reuse the existing same-owner guard from request_from_environment().
+    dispatch_token = env["WEB_SIMULATOR_DISPATCH_TOKEN"]
+    if event_name == "pull_request_target" and action == "build":
+        if env.get("GITHUB_EVENT_ACTION") == "synchronize" and auto_build_approved(
+                repository, number, pr, token):
+            # Subsequent commits are trusted only for the *current* open epoch.
+            dispatch_to_service(request, simulator, dispatch_token)
+        else:
+            # The reporter checks for a genuine native GitHub approval request.
+            dispatch_to_service(request, simulator, dispatch_token, APPROVAL_WORKFLOW)
+    else:
+        # /build and /build-auto both explicitly launch this SHA once.
+        dispatch_to_service(request, simulator, dispatch_token)
 
 
 if __name__ == "__main__":
