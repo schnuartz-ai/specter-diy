@@ -1,0 +1,18 @@
+{
+  "profile": "rev3",
+  "published": "2026-11-22T03:27:08Z",
+  "publishedAt": "2026-11-22T03:27:08Z",
+  "sha256": {
+    "bootloader.bin": "109ac493d092a7f8ff5380c9a9422e0209b13b796d0316cf72e50f7af4eac808",
+    "micropython.bin": "d3894416e761cf5f01eef4bc05a53960c605748674d0ebdd8c366e6f5c91b727",
+    "partition-table.bin": "37bd063033fb0478ccf799d74052c35ffb9c51ccacb8ab4b50c255dec5b6334b",
+    "storage-reset.bin": "7d2c7ac4888bfd75cd5f56e8d61f69595121183afc81556c876732fd3782c62f"
+  },
+  "source_commit": "3d43120107e7539f53a47353b00fc39e1073326e",
+  "source_url": "https://github.com/Schnuartz/specter-diy/commit/3d43120107e7539f53a47353b00fc39e1073326e",
+  "tag": "ESP32-P4 integration build \u00b7 rev3",
+  "tagName": "ESP32-P4 integration build \u00b7 rev3",
+  "url": "https://github.com/Schnuartz/specter-diy/tree/codex/esp32p4-smartcard-hat",
+  "zip": "specter-diy-wave_43-rev3-integration.zip",
+  "zip_sha256": "b5c71c5e3eb2c0dd4ac7199d25289c4140d8283005d88783d57cdc8158ff079b"
+}
