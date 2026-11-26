@@ -176,7 +176,7 @@ def align_button_pair(btn1, btn2):
     btn2.set_x(HOR_RES // 2 + PADDING // 2)
 
 
-def add_qrcode(text, y=QR_PADDING, scr=None, style=None, width=None, sensitive=False):
+def add_qrcode(text, y=QR_PADDING, scr=None, style=None, width=None):
     """Helper functions that creates a title-styled label"""
     if scr is None:
         scr = lv.scr_act()
@@ -184,7 +184,7 @@ def add_qrcode(text, y=QR_PADDING, scr=None, style=None, width=None, sensitive=F
     if width is None:
         width = 350
 
-    qr = QRCode(scr, sensitive=sensitive)
+    qr = QRCode(scr)
     qr.set_text(text)
     qr.set_size(width)
     qr.set_text(text)
