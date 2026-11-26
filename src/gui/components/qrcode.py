@@ -30,8 +30,9 @@ class QRCode(lv.obj):
     MAX_SIZE = QR_SIZES[-1]
 
     def __init__(self, *args, **kwargs):
-        self.sensitive = kwargs.pop("sensitive", False)
+        sensitive = kwargs.pop("sensitive", False)
         super().__init__(*args, **kwargs)
+        self.sensitive = sensitive
         style = lv.style_t()
         lv.style_copy(style, qr_style)
         style.text.font = lv.font_roboto_16
