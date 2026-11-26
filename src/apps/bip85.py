@@ -4,7 +4,7 @@ from io import BytesIO
 
 from app import BaseApp, AppError
 from embit import bip85
-from bip85_passwords import derive_password, PASSWORD_FORMATS, MAX_INDEX
+from bip85_passwords import derive_password, PASSWORD_FORMATS
 from gui.common import add_button, add_button_pair, align_button_pair
 from gui.decorators import on_release
 from gui.screens import Menu, NumericScreen, QRAlert, Alert, Prompt
@@ -101,10 +101,7 @@ class App(BaseApp):
             return True # stay in the menu
         if index == "":
             index = 0
-        # BIP85 uses a single hardened child index in every application.
         index = int(index)
-        if not 0 <= index <= MAX_INDEX:
-            raise AppError("Invalid derivation index")
         note = "index: %d" % index
 
         fgp = hexlify(self.keystore.fingerprint).decode()
@@ -185,23 +182,14 @@ class App(BaseApp):
             )
             if length is None:
                 return True
-            if length == "":
-                length = 24
-            length = int(length)
-            if not minimum <= length <= maximum:
-                raise AppError("Only %d-%d characters can be generated with Base%d" % (
-                    minimum, maximum, base
-                ))
-            title = "Derived Base%d password" % base
-            res = derive_password(self.keystore.root, base, length, index)
-            # Use the same QR result screen as other BIP85 outputs, without
-            # the plaintext SD export button or QR logging for passwords.
+            length = int(length or 24)
+            try:
+                res = derive_password(self.keystore.root, base, length, index)
+            except ValueError as e:
+                raise AppError(str(e))
             await show_screen(
-                QRAlert(
-                    title=title, message=res,
-                    note=note + ", length: %d" % length,
-                    sensitive=True,
-                )
+                QRAlert(title="Derived Base%d password" % base, message=res,
+                        note=note + ", length: %d" % length)
             )
             return True
         else:
@@ -223,3 +211,4 @@ class App(BaseApp):
                 )
             )
         return True
+
