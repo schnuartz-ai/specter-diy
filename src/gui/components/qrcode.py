@@ -32,8 +32,8 @@ class QRCode(lv.obj):
     def __init__(self, *args, **kwargs):
         sensitive = kwargs.pop("sensitive", False)
         super().__init__(*args, **kwargs)
-        self.sensitive = sensitive
         style = lv.style_t()
+        self.sensitive = sensitive
         lv.style_copy(style, qr_style)
         style.text.font = lv.font_roboto_16
         style.text.color = lv.color_hex(0x192432)
@@ -290,13 +290,20 @@ class QRCode(lv.obj):
         self.play.set_hidden((not self.is_fullscreen) or (self.idx is not None) or (self.encoder is None))
 
     def _set_text(self, text):
-        # one bcur frame doesn't require checksum
-        if not self.sensitive:
-            print(text)
-        self.set_style(qr_style)
+        # Sensitive payloads must bypass the public QR reporting hook, including
+        # the browser simulator's source patch which forwards public QR data.
+        if self.sensitive:
+            self.set_style(qr_style)
+        else:
+            self._report_public_text(text)
         self.qr.set_text(text)
         self.qr.align(self, lv.ALIGN.CENTER, 0, -100 if self.is_fullscreen else 0)
         self.note.align(self, lv.ALIGN.IN_BOTTOM_MID, 0, 0)
+
+    def _report_public_text(self, text):
+        # Keep the public reporting seam separate from sensitive rendering.
+        print(text)
+        self.set_style(qr_style)
 
     def get_real_text(self):
         return self.qr.get_text()
