@@ -30,6 +30,7 @@ class QRCode(lv.obj):
     MAX_SIZE = QR_SIZES[-1]
 
     def __init__(self, *args, **kwargs):
+        self.sensitive = kwargs.pop("sensitive", False)
         super().__init__(*args, **kwargs)
         style = lv.style_t()
         lv.style_copy(style, qr_style)
@@ -244,7 +245,7 @@ class QRCode(lv.obj):
         self.check_controls()
 
     def set_text(self, text="Text", set_first_frame=False):
-        if platform.simulator and self._text != text:
+        if not self.sensitive and platform.simulator and self._text != text:
             print("QR on screen:", text)
         self.encoder = None
         self._text = text
@@ -289,7 +290,8 @@ class QRCode(lv.obj):
 
     def _set_text(self, text):
         # one bcur frame doesn't require checksum
-        print(text)
+        if not self.sensitive:
+            print(text)
         self.set_style(qr_style)
         self.qr.set_text(text)
         self.qr.align(self, lv.ALIGN.CENTER, 0, -100 if self.is_fullscreen else 0)
