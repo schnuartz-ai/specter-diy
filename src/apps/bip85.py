@@ -199,7 +199,7 @@ class App(BaseApp):
             await show_screen(
                 QRAlert(
                     title=title, message=res,
-                    note=note + ", length: %d\nUse a separate seed for passwords." % length,
+                    note=note + ", length: %d" % length,
                     sensitive=True,
                 )
             )
