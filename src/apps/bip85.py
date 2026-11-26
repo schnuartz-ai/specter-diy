@@ -54,17 +54,6 @@ class Bip85MnemonicScreen(MnemonicScreen):
     def load(self):
         self.set_value(self.LOAD)
 
-class PasswordNumericScreen(NumericScreen):
-    """Numeric entry with an explicit way to cancel."""
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        add_button("Back", on_release(self.cancel), scr=self, y=300)
-
-    def cancel(self):
-        self.ta.set_text("")
-        self.set_value(None)
-
-
 class App(BaseApp):
     """
     WalletManager class manages your wallets.
@@ -104,8 +93,6 @@ class App(BaseApp):
         # back button
         if menuitem == 255:
             return False
-        if menuitem in (6, 7):
-            return await self.password_menu(show_screen, 64 if menuitem == 6 else 85)
         # get derivation index
         index = await show_screen(
             NumericScreen(title="Enter derivation index", note="Default: 0")
@@ -114,7 +101,10 @@ class App(BaseApp):
             return True # stay in the menu
         if index == "":
             index = 0
+        # BIP85 uses a single hardened child index in every application.
         index = int(index)
+        if not 0 <= index <= MAX_INDEX:
+            raise AppError("Invalid derivation index")
         note = "index: %d" % index
 
         fgp = hexlify(self.keystore.fingerprint).decode()
@@ -184,6 +174,36 @@ class App(BaseApp):
             raw = bip85.derive_hex(self.keystore.root, num_bytes, index)
             res = hexlify(raw).decode()
             file_suffix = "hex-%d" % num_bytes
+        elif menuitem in (6, 7):
+            base = 64 if menuitem == 6 else 85
+            _, minimum, maximum = PASSWORD_FORMATS[base]
+            length = await show_screen(
+                NumericScreen(
+                    title="Number of characters to generate",
+                    note="%d <= N <= %d. Default: 24" % (minimum, maximum),
+                )
+            )
+            if length is None:
+                return True
+            if length == "":
+                length = 24
+            length = int(length)
+            if not minimum <= length <= maximum:
+                raise AppError("Only %d-%d characters can be generated with Base%d" % (
+                    minimum, maximum, base
+                ))
+            title = "Derived Base%d password" % base
+            res = derive_password(self.keystore.root, base, length, index)
+            # Use the same QR result screen as other BIP85 outputs, without
+            # the plaintext SD export button or QR logging for passwords.
+            await show_screen(
+                QRAlert(
+                    title=title, message=res,
+                    note=note + ", length: %d\nUse a separate seed for passwords." % length,
+                    sensitive=True,
+                )
+            )
+            return True
         else:
             raise NotImplementedError("Not implemented")
         res = str(res)
@@ -200,69 +220,6 @@ class App(BaseApp):
                     title="Success",
                     message="Data is saved as\n\n%s" % fname,
                     button_text="Close",
-                )
-            )
-        return True
-
-    async def password_menu(self, show_screen, base):
-        app, minimum, maximum = PASSWORD_FORMATS[base]
-        title = "Base%d password" % base
-        length = await show_screen(
-            PasswordNumericScreen(
-                title="Enter password length",
-                note="%d-%d characters. Default: 24" % (minimum, maximum),
-            )
-        )
-        if length is None:
-            return True
-        if len(length) > 2:
-            raise AppError("Invalid password length")
-        length = int(length or "24")
-        if not minimum <= length <= maximum:
-            raise AppError("Password length must be %d-%d" % (minimum, maximum))
-        index = await show_screen(
-            PasswordNumericScreen(
-                title="Enter derivation index",
-                note="0-%d. Default: 0" % MAX_INDEX,
-            )
-        )
-        if index is None:
-            return True
-        if len(index) > 10:
-            raise AppError("Invalid derivation index")
-        index = int(index or "0")
-        if not 0 <= index <= MAX_INDEX:
-            raise AppError("Invalid derivation index")
-        path = "m/83696968'/%d'/%d'/%d'" % (app, length, index)
-        reveal = await show_screen(
-            Prompt(
-                title=title,
-                message=path + "\n\nKeep the format, length and index for recovery. "
-                "Anyone with your root seed can derive this password. "
-                "Use a separate seed for password management.",
-                confirm_text="Reveal",
-            )
-        )
-        if not reveal:
-            return True
-        password = derive_password(self.keystore.root, base, length, index)
-        # Never use QRWithSD: passwords must not be written to disk or logged.
-        show_qr = await show_screen(
-            Prompt(
-                title=title,
-                message=path + "\n\n" + password + "\n\n"
-                "Anyone who scans the QR can read this password.",
-                confirm_text="Show QR",
-                cancel_text="Close",
-            )
-        )
-        if show_qr:
-            await show_screen(
-                QRAlert(
-                    title=title,
-                    message=path,
-                    qr_message=password,
-                    sensitive=True,
                 )
             )
         return True
