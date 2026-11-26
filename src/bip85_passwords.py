@@ -15,9 +15,7 @@ def _encode_base85(entropy):
     # BIP85 always provides 64 bytes, so no partial groups or padding.
     result = bytearray(80)
     for offset in range(0, 64, 4):
-        value = 0
-        for i in range(4):
-            value = (value << 8) | entropy[offset + i]
+        value = int.from_bytes(entropy[offset:offset + 4], "big")
         pos = offset // 4 * 5
         for i in range(4, -1, -1):
             value, digit = divmod(value, 85)
@@ -31,15 +29,12 @@ def derive_password(root, base, length, index=0):
         raise ValueError("Unsupported password format")
     app, minimum, maximum = PASSWORD_FORMATS[base]
     if type(length) is not int or not minimum <= length <= maximum:
-        raise ValueError("Invalid password length")
+        raise ValueError("Password length must be %d-%d" % (minimum, maximum))
     if type(index) is not int or not 0 <= index <= MAX_INDEX:
         raise ValueError("Invalid derivation index")
     entropy = bip85.derive_entropy(root, app, [length, index])
     if len(entropy) != 64:
         raise ValueError("Invalid BIP85 entropy length")
-    if base == 64:
-        encoded = b2a_base64(entropy).strip()
-    else:
-        encoded = _encode_base85(entropy)
-    # Length limits ensure that no Base64 padding is returned.
+    encoded = b2a_base64(entropy) if base == 64 else _encode_base85(entropy)
+    # Length limits exclude Base64 padding and newline.
     return encoded[:length].decode()
