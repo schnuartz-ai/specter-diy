@@ -4,6 +4,7 @@ from io import BytesIO
 
 from app import BaseApp, AppError
 from embit import bip85
+from bip85_passwords import derive_password, PASSWORD_FORMATS
 from gui.common import add_button, add_button_pair, align_button_pair
 from gui.decorators import on_release
 from gui.screens import Menu, NumericScreen, QRAlert, Alert, Prompt
@@ -73,6 +74,9 @@ class App(BaseApp):
             (3, "WIF key (single private key)"),
             (4, "Master private key (xprv)"),
             (5, "Raw entropy (16-64 bytes)"),
+            (None, "Passwords"),
+            (6, "Base64 password"),
+            (7, "Base85 password"),
         ]
 
         # wait for menu selection
@@ -167,6 +171,27 @@ class App(BaseApp):
             raw = bip85.derive_hex(self.keystore.root, num_bytes, index)
             res = hexlify(raw).decode()
             file_suffix = "hex-%d" % num_bytes
+        elif menuitem in (6, 7):
+            base = 64 if menuitem == 6 else 85
+            _, minimum, maximum = PASSWORD_FORMATS[base]
+            length = await show_screen(
+                NumericScreen(
+                    title="Number of characters to generate",
+                    note="%d <= N <= %d. Default: 24" % (minimum, maximum),
+                )
+            )
+            if length is None:
+                return True
+            length = int(length or 24)
+            try:
+                res = derive_password(self.keystore.root, base, length, index)
+            except ValueError as e:
+                raise AppError(str(e))
+            await show_screen(
+                QRAlert(title="Derived Base%d password" % base, message=res,
+                        note=note + ", length: %d" % length)
+            )
+            return True
         else:
             raise NotImplementedError("Not implemented")
         res = str(res)
