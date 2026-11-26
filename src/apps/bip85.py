@@ -4,6 +4,7 @@ from io import BytesIO
 
 from app import BaseApp, AppError
 from embit import bip85
+from bip85_passwords import derive_password, PASSWORD_FORMATS, MAX_INDEX
 from gui.common import add_button, add_button_pair, align_button_pair
 from gui.decorators import on_release
 from gui.screens import Menu, NumericScreen, QRAlert, Alert, Prompt
@@ -53,6 +54,17 @@ class Bip85MnemonicScreen(MnemonicScreen):
     def load(self):
         self.set_value(self.LOAD)
 
+class PasswordNumericScreen(NumericScreen):
+    """Numeric entry with an explicit way to cancel."""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        add_button("Back", on_release(self.cancel), scr=self, y=300)
+
+    def cancel(self):
+        self.ta.set_text("")
+        self.set_value(None)
+
+
 class App(BaseApp):
     """
     WalletManager class manages your wallets.
@@ -73,6 +85,9 @@ class App(BaseApp):
             (3, "WIF key (single private key)"),
             (4, "Master private key (xprv)"),
             (5, "Raw entropy (16-64 bytes)"),
+            (None, "Passwords"),
+            (6, "Base64 password"),
+            (7, "Base85 password"),
         ]
 
         # wait for menu selection
@@ -89,6 +104,8 @@ class App(BaseApp):
         # back button
         if menuitem == 255:
             return False
+        if menuitem in (6, 7):
+            return await self.password_menu(show_screen, 64 if menuitem == 6 else 85)
         # get derivation index
         index = await show_screen(
             NumericScreen(title="Enter derivation index", note="Default: 0")
@@ -187,3 +204,65 @@ class App(BaseApp):
             )
         return True
 
+    async def password_menu(self, show_screen, base):
+        app, minimum, maximum = PASSWORD_FORMATS[base]
+        title = "Base%d password" % base
+        length = await show_screen(
+            PasswordNumericScreen(
+                title="Enter password length",
+                note="%d-%d characters. Default: 24" % (minimum, maximum),
+            )
+        )
+        if length is None:
+            return True
+        if len(length) > 2:
+            raise AppError("Invalid password length")
+        length = int(length or "24")
+        if not minimum <= length <= maximum:
+            raise AppError("Password length must be %d-%d" % (minimum, maximum))
+        index = await show_screen(
+            PasswordNumericScreen(
+                title="Enter derivation index",
+                note="0-%d. Default: 0" % MAX_INDEX,
+            )
+        )
+        if index is None:
+            return True
+        if len(index) > 10:
+            raise AppError("Invalid derivation index")
+        index = int(index or "0")
+        if not 0 <= index <= MAX_INDEX:
+            raise AppError("Invalid derivation index")
+        path = "m/83696968'/%d'/%d'/%d'" % (app, length, index)
+        reveal = await show_screen(
+            Prompt(
+                title=title,
+                message=path + "\n\nKeep the format, length and index for recovery. "
+                "Anyone with your root seed can derive this password. "
+                "Use a separate seed for password management.",
+                confirm_text="Reveal",
+            )
+        )
+        if not reveal:
+            return True
+        password = derive_password(self.keystore.root, base, length, index)
+        # Never use QRWithSD: passwords must not be written to disk or logged.
+        show_qr = await show_screen(
+            Prompt(
+                title=title,
+                message=path + "\n\n" + password + "\n\n"
+                "Anyone who scans the QR can read this password.",
+                confirm_text="Show QR",
+                cancel_text="Close",
+            )
+        )
+        if show_qr:
+            await show_screen(
+                QRAlert(
+                    title=title,
+                    message=path,
+                    qr_message=password,
+                    sensitive=True,
+                )
+            )
+        return True
